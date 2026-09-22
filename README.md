@@ -241,7 +241,8 @@ build for you:
 
 ```
 "C:\Program Files\AutoHotkey\Compiler\Ahk2Exe.exe" /in SteamSaveTimeline.ahk ^
-  /out SteamSaveTimeline.exe /base "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
+  /out SteamSaveTimeline.exe /icon SteamSaveTimeline.ico ^
+  /base "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
 ```
 
 Keep the exe beside the `.ps1` files, since it finds them through its own

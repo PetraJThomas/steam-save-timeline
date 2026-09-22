@@ -17,7 +17,12 @@
 ; first or the output file is locked:
 ;
 ;   "C:\Program Files\AutoHotkey\Compiler\Ahk2Exe.exe" /in SteamSaveTimeline.ahk ^
-;     /out SteamSaveTimeline.exe /base "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
+;     /out SteamSaveTimeline.exe /icon SteamSaveTimeline.ico ^
+;     /base "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
+;
+; /icon is what gives the EXE its own icon in Explorer and the taskbar.
+; TraySetIcon below only changes the tray icon at runtime, so without /icon the
+; compiled file still carries the stock AutoHotkey icon.
 ;
 ; Keep the exe BESIDE the .ps1 files -- it finds them through A_ScriptDir. To
 ; start it at log on, put a shortcut to it in shell:startup; steam_save_setup.ps1
