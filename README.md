@@ -282,7 +282,14 @@ checks pass. Static card outlines are recorded as decorative and reported as
 out of scope rather than being quietly left out of the list.
 
 Icons come from the system icon font (Segoe Fluent Icons, falling back to Segoe
-MDL2 Assets), so there is nothing to install and no missing-glyph boxes.
+MDL2 Assets), so there is nothing to install and no missing-glyph boxes. The app
+icon is pulled live from `imageres.dll` for the same reason.
+
+Inside the mirror, each game folder carries a `desktop.ini` so Explorer shows
+"Kayak VR: Mirage (1683340)" while the folder is still named by App ID, which is
+what every commit references. Those files are gitignored: Explorer only honours
+them when the folder itself is marked read-only, and git stores no file
+attributes, so a cloned copy would be inert anyway.
 
 ## Configuration
 

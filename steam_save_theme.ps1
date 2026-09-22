@@ -249,3 +249,52 @@ $SteamSaveTheme = @'
     </Style>
   </Window.Resources>
 '@
+
+<#
+The app icon: Windows' own "previous versions" icon from imageres.dll,
+extracted at runtime so nothing has to ship and nothing can go missing.
+
+Two things ruled others out, both measured rather than guessed:
+
+  The cloud nearby is the OneDrive glyph. This tool offers OneDrive as a
+  backup destination, so that icon would read as OneDrive sync status.
+
+  The sync arrows nearby are an OVERLAY BADGE: a 15x15 glyph sitting in the
+  corner of a 32x32 canvas, 22% fill, offset -9,+8. Windows scales the whole
+  canvas down for a title bar, so the badge lands as a tiny dot. Anything used
+  as an app icon has to fill its canvas; this one is 81% and centred.
+
+Mind the numbering. ExtractIconEx indexes from 0 and AutoHotkey's IconNumber
+from 1, so the SAME icon is 142 here and 143 in SteamSaveTimeline.ahk. Verified
+by rendering both, not by reading docs.
+#>
+$script:AppIconSource = $null
+
+function Get-AppIcon {
+    if ($script:AppIconSource) { return $script:AppIconSource }
+    try {
+        if (-not ('SstIcon' -as [type])) {
+            Add-Type @"
+using System;using System.Runtime.InteropServices;
+public class SstIcon {
+  [DllImport("shell32.dll",CharSet=CharSet.Unicode)]
+  public static extern int ExtractIconEx(string f,int i,IntPtr[] big,IntPtr[] small,int n);
+  [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr h);
+}
+"@
+        }
+        $big = New-Object IntPtr[] 1
+        [void][SstIcon]::ExtractIconEx("$env:WINDIR\System32\imageres.dll", 142, $big, (New-Object IntPtr[] 1), 1)
+        if ($big[0] -ne [IntPtr]::Zero) {
+            $src = [System.Windows.Interop.Imaging]::CreateBitmapSourceFromHIcon(
+                       $big[0], [System.Windows.Int32Rect]::Empty,
+                       [System.Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions())
+            $src.Freeze()
+            [void][SstIcon]::DestroyIcon($big[0])
+            $script:AppIconSource = $src
+        }
+    } catch {
+        # decoration only: a missing icon must never stop a window opening
+    }
+    return $script:AppIconSource
+}

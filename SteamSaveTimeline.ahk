@@ -57,6 +57,12 @@ BuildTray() {
     A_TrayMenu.Add()
     A_TrayMenu.Add("Exit", (*) => ExitApp())
     A_TrayMenu.Default := "Open Timeline Browser"
+    ; Windows' own "previous versions" icon. Not the cloud nearby (that is the
+    ; OneDrive glyph, and this tool offers OneDrive as a destination) and not
+    ; the sync arrows nearby (an overlay badge: 22% fill, so it shrinks to a
+    ; dot). AutoHotkey numbers icons from 1 and ExtractIconEx from 0, so this is
+    ; 143 here and 142 in steam_save_theme.ps1. Same picture.
+    try TraySetIcon(A_WinDir "\System32\imageres.dll", 143)
     A_IconTip := "Steam Save Timeline - capturing"
     if FileExist(STARTUP_LNK)
         A_TrayMenu.Check("Start with Windows")

@@ -542,6 +542,7 @@ $SteamSaveTheme
 "@
 
 $window       = [Windows.Markup.XamlReader]::Load([System.Xml.XmlNodeReader]::new($xaml))
+$appIcon      = Get-AppIcon; if ($appIcon) { $window.Icon = $appIcon }
 $GameList     = $window.FindName('GameList')
 $TimelineBar  = $window.FindName('TimelineBar')
 $TimelineList = $window.FindName('TimelineList')

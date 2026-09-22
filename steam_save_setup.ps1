@@ -479,6 +479,7 @@ $SteamSaveTheme
 "@
 
 $window        = [Windows.Markup.XamlReader]::Load([System.Xml.XmlNodeReader]::new($xaml))
+$appIcon       = Get-AppIcon; if ($appIcon) { $window.Icon = $appIcon }
 $CheckList     = $window.FindName('CheckList')
 $OptLogon      = $window.FindName('OptLogon')
 $MethodPanel   = $window.FindName('MethodPanel')

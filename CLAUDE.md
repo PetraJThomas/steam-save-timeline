@@ -72,6 +72,23 @@ user-facing doc; this file is the working notes.
   itself, so settings can never disagree with reality. Gitignored, created on
   demand, malformed file falls back to defaults rather than stopping capture.
 
+- The app icon is pulled live from `imageres.dll` (no .ico ships). Two traps,
+  both measured rather than guessed: **ExtractIconEx indexes from 0 and AHK
+  from 1**, so the same picture is 142 in the theme and 143 in the .ahk; and
+  much of that DLL is **overlay badges**, a small glyph in the corner of a
+  32x32 canvas, which shrink to a dot in a title bar. Before using any icon,
+  measure its non-transparent bounding box: anything under about 75% fill is a
+  badge, not an app icon. The OneDrive cloud is also out on purpose, since this
+  tool offers OneDrive as a destination and that icon would read as sync status.
+
+- `desktop.ini` in each game folder gives Explorer a readable label while the
+  folder stays named by appid. It is **gitignored deliberately**, for two
+  reasons that were tested, not assumed: Explorer only honours it when the
+  FOLDER carries the ReadOnly attribute, and git stores no attributes, so a
+  cloned copy would be inert; and because the label contains the game name, a
+  Steam rename would otherwise write a commit into that game's save timeline
+  whose only change is a cosmetic file. Do not "fix" the gitignore.
+
 - `run-hidden.vbs`, a three-line WScript shim. Everything launched from a
   shortcut or the log-on task goes through it, because
   `powershell -WindowStyle Hidden` still creates and paints a console for a
