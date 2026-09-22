@@ -207,9 +207,10 @@ function Register-AtLogon([string]$Method) {
         return "startup shortcut -> $exe"
     }
 
-    $watcher = Join-Path $PSScriptRoot 'steam_save_watcher.ps1'
-    $action  = New-ScheduledTaskAction -Execute 'powershell.exe' `
-                 -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$watcher`"" `
+    # Through the shim, so logging in does not flash a console at you.
+    $shim    = Join-Path $PSScriptRoot 'run-hidden.vbs'
+    $action  = New-ScheduledTaskAction -Execute 'wscript.exe' `
+                 -Argument "`"$shim`" steam_save_watcher.ps1" `
                  -WorkingDirectory $PSScriptRoot
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
     # No execution time limit: this is a daemon, not a job that finishes.
@@ -329,7 +330,7 @@ $SteamSaveTheme
         <Border Margin="0,8,0,0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}"
                 BorderThickness="1" CornerRadius="6" Padding="14,12">
           <StackPanel>
-            <CheckBox Name="OptLogon" IsChecked="True" Content="Start capturing when I log in"/>
+            <CheckBox Name="OptLogon" IsChecked="True" Content="Start with Windows (keep capturing automatically)"/>
             <StackPanel Name="MethodPanel" Margin="24,6,0,0">
               <RadioButton Name="MethodExe"  GroupName="startup" Content="Tray app (SteamSaveTimeline.exe) - also gives one-click access to the browser"/>
               <RadioButton Name="MethodTask" GroupName="startup" Content="Task Scheduler - no tray icon, nothing to delete by accident" Margin="0,4,0,0"/>
@@ -509,7 +510,7 @@ function Invoke-Checks {
     }
     if ($ex.Task -or $ex.Startup) {
         $how = if ($ex.Startup) { 'startup shortcut' } else { 'scheduled task' }
-        Add-Check 'ok' 'Starts at log on' $how
+        Add-Check 'ok' 'Starts with Windows' $how
         $OptLogon.IsChecked = $true
     }
 
@@ -573,8 +574,8 @@ function Invoke-Setup {
         if ($OptDesktop.IsChecked) {
             try {
                 $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Steam Save Timeline.lnk'
-                New-Shortcut $lnk 'powershell.exe' `
-                    "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'steam_save_restore_gui.ps1')`"" `
+                New-Shortcut $lnk 'wscript.exe' `
+                    "`"$(Join-Path $PSScriptRoot 'run-hidden.vbs')`" steam_save_restore_gui.ps1" `
                     $PSScriptRoot 'Browse and restore Steam Cloud saves'
                 Write-Log "[desktop] $lnk"
             } catch { Write-Log "[warn] could not create the desktop shortcut: $_" }
@@ -636,8 +637,7 @@ $OptLogon.Add_Unchecked({  $MethodPanel.IsEnabled = $false })
 
 $GoBtn.Add_Click({
     if ($script:Done) {
-        Start-Process powershell -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass',
-            '-File', (Join-Path $PSScriptRoot 'steam_save_restore_gui.ps1')
+        Start-Process wscript -ArgumentList "`"$(Join-Path $PSScriptRoot 'run-hidden.vbs')`"", 'steam_save_restore_gui.ps1'
         $window.Close()
         return
     }

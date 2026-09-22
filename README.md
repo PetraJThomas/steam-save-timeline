@@ -31,10 +31,14 @@ powershell -ExecutionPolicy Bypass -File steam_save_setup.ps1
 ```
 
 The setup window checks what you have, tells you what it found in your Steam
-library, mirrors every game, and offers to start capture when you log in. It
-can also keep a second copy somewhere off this drive, either in a folder such
-as an external drive or OneDrive, or in a free private online backup it creates
-for you.
+library, mirrors every game, and offers to **start with Windows** so capture
+keeps happening on its own. It can also keep a second copy somewhere off this
+drive, either in a folder such as an external drive or OneDrive, or in a free
+private online backup it creates for you.
+
+Nothing flashes a console window at you: the shortcuts and the log-on task go
+through `run-hidden.vbs`, because `powershell -WindowStyle Hidden` still paints
+a black box for a frame before hiding it.
 
 It is safe to re-run at any time. Everything it does is idempotent, and on an
 existing install it reports the current state and repairs whatever is missing.
@@ -148,12 +152,12 @@ git checkout <commit> -- <appid>/remote/<file>
 
 | Action | What it does |
 | --- | --- |
-| **Fork from here** | Start a new timeline at the selected point and make it active. New syncs go there, and `main` is left exactly as it was. |
+| **Branch / Diverge Save** | Start a new timeline at the selected point and make it active. New syncs go there, and `main` is left exactly as it was. |
 | **Play this one** | Make another timeline active and load its latest save into Steam. |
 | **Make canonical** | Copy a save branch's current state onto `main` as a new commit, then go back to playing `main`. |
 | **Restore** | Load any point from any timeline. The restore is committed on top of whichever timeline is active. |
 
-The commit where a save branch left `main` is tagged **FORKED HERE** in its
+The commit where a save branch left `main` is tagged **DIVERGED HERE** in its
 timeline, so "roll back to before I ever diverged" is one Restore on that row.
 
 **Make canonical is a roll-forward, not a merge or a reset.** `main` keeps its
@@ -198,7 +202,8 @@ after all.
 | `steam_save_roots.ps1` | Resolving Steam's root codes to real paths. `-Report` audits them. |
 | `steam_save_restore_gui.ps1` | The timeline browser. |
 | `steam_save_theme.ps1` | One dark theme, shared by both windows. |
-| `SteamSaveTimeline.ahk` | Optional tray app and boot hook. |
+| SteamSaveTimeline.ahk | Optional tray app and boot hook. |
+| un-hidden.vbs | Launches a script with no console window at all. Used by the shortcuts and the log-on task. |
 
 Timeline commits are built with a throwaway git index (`read-tree`, then
 `add -A -- <appid>`, `write-tree`, `commit-tree`, `update-ref`), so a branch is
@@ -211,7 +216,7 @@ history with `git log game/<appid>/main` instead.
 
 `SteamSaveTimeline.ahk` is a passive boot hook. It starts the watcher hidden at
 log on and keeps a tray icon offering *Open timeline browser*, *Snapshot
-everything now*, *Restart capture* and *Exit*.
+everything now*, *Restart capture*, *Start with Windows* and *Exit*.
 
 **You do not need AutoHotkey to run it.** A compiled exe bundles the AHK v2
 runtime. AHK is only needed to rebuild it, and setup can install it and do the

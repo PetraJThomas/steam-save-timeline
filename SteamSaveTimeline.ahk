@@ -29,6 +29,7 @@ SCRIPTS  := A_ScriptDir
 WATCHER  := SCRIPTS "\steam_save_watcher.ps1"
 BROWSER  := SCRIPTS "\steam_save_restore_gui.ps1"
 SETUP    := SCRIPTS "\steam_save_setup.ps1"
+STARTUP_LNK := A_Startup "\Steam Save Timeline.lnk"
 WatchPid := 0
 
 if !FileExist(WATCHER) {
@@ -47,21 +48,46 @@ return
 
 BuildTray() {
     A_TrayMenu.Delete()
-    A_TrayMenu.Add("Open timeline browser", (*) => RunPS(BROWSER, false))
+    A_TrayMenu.Add("Open timeline browser", (*) => RunPS(BROWSER, true))
     A_TrayMenu.Add("Snapshot everything now", (*) => SnapshotNow())
     A_TrayMenu.Add()
     A_TrayMenu.Add("Restart capture", (*) => RestartWatcher())
-    A_TrayMenu.Add("Setup...", (*) => RunPS(SETUP, false))
+    A_TrayMenu.Add("Start with Windows", (*) => ToggleStartup())
+    A_TrayMenu.Add("Setup...", (*) => RunPS(SETUP, true))
     A_TrayMenu.Add()
     A_TrayMenu.Add("Exit", (*) => ExitApp())
     A_TrayMenu.Default := "Open timeline browser"
     A_IconTip := "Steam Save Timeline - capturing"
+    if FileExist(STARTUP_LNK)
+        A_TrayMenu.Check("Start with Windows")
+}
+
+; Reachable without opening the setup window, because "make this keep happening"
+; is the one setting anyone changes after the first run. A_ScriptFullPath is the
+; exe once compiled, so the shortcut points at the right thing either way.
+ToggleStartup() {
+    global STARTUP_LNK
+    if FileExist(STARTUP_LNK) {
+        try FileDelete(STARTUP_LNK)
+        A_TrayMenu.Uncheck("Start with Windows")
+        TrayTip("Will not start with Windows", "Steam Save Timeline")
+    } else {
+        try {
+            FileCreateShortcut(A_ScriptFullPath, STARTUP_LNK, A_ScriptDir, ,
+                               "Capture Steam Cloud saves into a git timeline")
+            A_TrayMenu.Check("Start with Windows")
+            TrayTip("Will start with Windows", "Steam Save Timeline")
+        } catch as e {
+            MsgBox("Could not write the startup shortcut:`n" e.Message, "Steam Save Timeline", "Icon!")
+        }
+    }
 }
 
 ; ---------------------------------------------------------------- actions
 
-; Hidden for the daemon, visible for anything the user asked for by hand --
-; a manual action with no feedback looks broken.
+; Hidden by default: the browser and the setup window are their own feedback, so
+; a console alongside them is just a black box flashing up for no reason. Only
+; the one-shot sweep is shown, because its console IS the feedback.
 RunPS(file, hidden := true, args := "") {
     global SCRIPTS
     if !FileExist(file) {

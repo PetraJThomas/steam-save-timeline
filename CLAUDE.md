@@ -1,4 +1,4 @@
-﻿# Steam Save Timeline
+# Steam Save Timeline
 
 Repo: `C:\PersonalProjects\steam-save-timeline`, published at
 https://github.com/PetraJThomas/steam-save-timeline (public, MIT).
@@ -38,8 +38,17 @@ user-facing doc; this file is the working notes.
   into both windows. Not a ResourceDictionary file: keeping it a string
   means no extra file to ship and the two windows cannot drift apart.
 
+- `run-hidden.vbs`, a three-line WScript shim. Everything launched from a
+  shortcut or the log-on task goes through it, because
+  `powershell -WindowStyle Hidden` still creates and paints a console for a
+  frame before hiding it, which reads as a glitch at log-on. Verified: no
+  `ConsoleWindowClass` window is created at all. Do not "simplify" a launcher
+  back to plain powershell.exe.
+
 - `SteamSaveTimeline.ahk`, optional AHK v2 tray app / boot hook. Starts the
-  watcher hidden and offers the browser from the tray. Compiled, it needs no
+  watcher hidden, offers the browser from the tray, and carries a
+  **Start with Windows** toggle that writes/removes its own Startup shortcut,
+  so the one setting anyone revisits does not require opening setup. Compiled, it needs no
   AHK installed (the exe bundles the v2 runtime); AHK is only needed to
   rebuild. **It binds no hotkeys on purpose**. Hotkeys.exe is this
   machine's single resident hotkey host and two hosts would fight. A hotkey
@@ -105,14 +114,14 @@ user-facing doc; this file is the working notes.
   buttons rather than a combo box, so a ComboBox ControlTemplate does not
   have to be hand-rolled. Timeline rows are colour-coded by event kind:
   SYNC (blue, Steam moved data), SNAPSHOT (slate, a sweep), RESTORE
-  (amber), CANONICAL (green), CREATED (grey), plus a FORKED HERE chip.
+  (amber), CANONICAL (green), CREATED (grey), plus a DIVERGED HERE chip.
   Game list from games.json; a timeline picker per game, and
   one branch per game means history is just `git log game/<appid>/main`.
-  Beyond Restore it offers **Fork from here** (new save branch at the
+  Beyond Restore it offers **Branch / Diverge Save** (new save branch at the
   selected point, becomes active), **Play this one** (make another timeline
   active and load its latest save), and **Make canonical** (commit a save
   branch's current state onto main, then go back to playing main). The point
-  where a save branch left main is marked in its timeline, so "roll back to
+  where a save branch left main is marked DIVERGED HERE, so "roll back to
   before I diverged" is one Restore on that row.
   Restore: reads the target commit with `git ls-tree` and shows every
   destination it would overwrite *before* touching anything; warns if

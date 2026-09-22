@@ -9,13 +9,14 @@ Pick a game, pick one of its timelines, pick a point:
   Restore        load that point back into Steam. The restore is committed on
                  top of whichever timeline is active, roll-forward, so the
                  state you are replacing stays in history.
-  Fork from here start a new save branch at that point and make it active. New
-                 syncs go there; main is left exactly as it was.
+  Branch / Diverge Save
+                 start a new save branch at that point and make it active.
+                 New syncs go there; main is left exactly as it was.
   Play this one  make another timeline active and load its latest save.
   Make canonical copy a save branch's current state onto main as a new commit,
                  then go back to playing main. Never a rebase or a merge.
 
-The point at which a save branch left main is marked in its timeline, so
+The point at which a save branch left main is marked DIVERGED HERE, so
 "roll back to before I ever diverged" is one Restore on that row.
 
 Run:  powershell -ExecutionPolicy Bypass -File steam_save_restore_gui.ps1
@@ -27,7 +28,6 @@ $MirrorDir = Join-Path $env:USERPROFILE 'steam-save-history'
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework
-Add-Type -AssemblyName Microsoft.VisualBasic          # InputBox, for naming a timeline
 
 . (Join-Path $PSScriptRoot 'steam_save_theme.ps1')
 . (Join-Path $PSScriptRoot 'steam_save_roots.ps1')
@@ -78,6 +78,102 @@ function Get-Timeline([string]$AppId, [string]$Branch) {
             Label     = "{0}  {1} {2}" -f ([datetime]$date).ToString('yyyy-MM-dd HH:mm'), $kind, $detail
         }
     }
+}
+
+function Show-BranchDialog($Owner, [string]$AppId, [string]$GameName, [string]$PointLabel) {
+    <#
+    Name a new save branch. Its own themed window rather than
+    Microsoft.VisualBasic's InputBox, which is an unstyled Win32 box looking
+    nothing like the rest of the app. It also does what an InputBox cannot:
+    show the name that will actually be used, and refuse a reserved or
+    duplicate one while you are typing instead of after you commit to it.
+    #>
+    [xml]$dx = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Branch this save" Width="500" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" Background="#0F1319" ShowInTaskbar="False"
+        TextOptions.TextFormattingMode="Display" UseLayoutRounding="True">
+$SteamSaveTheme
+  <StackPanel Margin="24,20,24,20">
+    <TextBlock Text="Branch this save" FontSize="17" FontWeight="SemiBold"/>
+    <TextBlock Name="SubText" Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap"
+               Foreground="{StaticResource Muted}"/>
+
+    <Border Margin="0,16,0,0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}"
+            BorderThickness="1" CornerRadius="6" Padding="13,10">
+      <StackPanel>
+        <TextBlock Text="STARTS FROM" FontSize="9.5" FontWeight="SemiBold" Foreground="{StaticResource Muted}"/>
+        <TextBlock Name="PointText" Margin="0,6,0,0" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap"/>
+      </StackPanel>
+    </Border>
+
+    <TextBlock Text="CALL IT" FontSize="9.5" FontWeight="SemiBold" Margin="0,18,0,0"
+               Foreground="{StaticResource Muted}"/>
+    <TextBox Name="NameBox" Margin="0,7,0,0" FontSize="13.5" Padding="9,7"/>
+    <TextBlock Name="HintText" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+               Foreground="{StaticResource Muted}"/>
+
+    <DockPanel Margin="0,20,0,0" LastChildFill="False">
+      <Button Name="OkBtn" Content="Create branch" Style="{StaticResource BtnPrimary}"
+              DockPanel.Dock="Right" Margin="8,0,0,0" IsEnabled="False"/>
+      <Button Name="CancelBtn" Content="Cancel" Style="{StaticResource Btn}" DockPanel.Dock="Right"/>
+    </DockPanel>
+  </StackPanel>
+</Window>
+"@
+    $dlg = [Windows.Markup.XamlReader]::Load([System.Xml.XmlNodeReader]::new($dx))
+    if ($Owner) { $dlg.Owner = $Owner } else { $dlg.WindowStartupLocation = 'CenterScreen' }
+    $sub       = $dlg.FindName('SubText')
+    $point     = $dlg.FindName('PointText')
+    $box       = $dlg.FindName('NameBox')
+    $hint      = $dlg.FindName('HintText')
+    $ok        = $dlg.FindName('OkBtn')
+    $cancel    = $dlg.FindName('CancelBtn')
+
+    $sub.Text        = "New syncs for $GameName go to this branch. The timeline you are on now is left exactly as it is, so you can come back to it."
+    $point.Text      = $PointLabel
+    $hint.Text       = 'Whatever this save branch should be called, in a few words.'
+    $ok.IsDefault    = $true
+    $cancel.IsCancel = $true
+
+    $script:branchName = $null
+    $muted = $dlg.FindResource('Muted')
+    $good  = $dlg.FindResource('Good')
+    $bad   = New-Brush '#E06C6C'
+
+    $validate = {
+        $typed = $box.Text.Trim()
+        if (-not $typed) {
+            $hint.Foreground = $muted
+            $hint.Text = 'Whatever this save branch should be called, in a few words.'
+            $ok.IsEnabled = $false
+            return
+        }
+        $slug = ConvertTo-TimelineSlug $typed
+        if ($slug -in @('main', 'daily')) {
+            $hint.Foreground = $bad
+            $hint.Text = "'$slug' is a reserved name. Try something else."
+            $ok.IsEnabled = $false
+            return
+        }
+        if (Test-Timeline "game/$AppId/$slug") {
+            $hint.Foreground = $bad
+            $hint.Text = "$GameName already has a branch called '$slug'."
+            $ok.IsEnabled = $false
+            return
+        }
+        $hint.Foreground = $good
+        $hint.Text = "Saved as: $slug"
+        $ok.IsEnabled = $true
+    }
+    $box.Add_TextChanged($validate)
+    $ok.Add_Click({ $script:branchName = $box.Text; $dlg.DialogResult = $true })
+    $cancel.Add_Click({ $dlg.DialogResult = $false })
+    $dlg.Add_ContentRendered({ $box.Focus() })
+
+    if ($dlg.ShowDialog()) { return $script:branchName }
+    return $null
 }
 
 function Test-SteamRunning { [bool](Get-Process -Name 'steam' -ErrorAction SilentlyContinue) }
@@ -256,7 +352,7 @@ $SteamSaveTheme
             <WrapPanel Name="TimelineBar" DockPanel.Dock="Left" Orientation="Horizontal"/>
             <Button Name="CanonicalBtn" Content="Make canonical" Style="{StaticResource Btn}" DockPanel.Dock="Right" Margin="6,0,0,0" IsEnabled="False"/>
             <Button Name="SwitchBtn"    Content="Play this one"  Style="{StaticResource Btn}" DockPanel.Dock="Right" Margin="6,0,0,0" IsEnabled="False"/>
-            <Button Name="ForkBtn"      Content="Fork from here" Style="{StaticResource Btn}" DockPanel.Dock="Right" IsEnabled="False"/>
+            <Button Name="ForkBtn"      Content="Branch / Diverge Save" Style="{StaticResource Btn}" DockPanel.Dock="Right" Padding="16,7" IsEnabled="False"/>
           </DockPanel>
         </StackPanel>
 
@@ -286,7 +382,7 @@ $SteamSaveTheme
                              FontSize="12" TextTrimming="CharacterEllipsis"/>
                   <Border Grid.Column="3" Visibility="{Binding ForkVis}" CornerRadius="3" Padding="7,2"
                           Background="#2B2039" BorderBrush="{StaticResource ForkC}" BorderThickness="1">
-                    <TextBlock Text="FORKED HERE" FontSize="9.5" FontWeight="Bold" Foreground="{StaticResource ForkC}"/>
+                    <TextBlock Text="DIVERGED HERE" FontSize="9.5" FontWeight="Bold" Foreground="{StaticResource ForkC}"/>
                   </Border>
                 </Grid>
               </DataTemplate>
@@ -391,7 +487,7 @@ function Update-CommitList($Game, $Tl) {
 
     $msg = "$($TimelineList.Items.Count) point(s) on '$($Tl.Label)'."
     if     ($Tl.Kind -eq 'daily') { $msg += '  Daily snapshots are an archive. Restoring from here lands on the timeline you are playing.' }
-    elseif ($Tl.Kind -eq 'fork')  { $msg += '  The FORKED HERE row is where this branch left main. Restore it to undo the divergence.' }
+    elseif ($Tl.Kind -eq 'fork')  { $msg += '  The DIVERGED HERE row is where this branch left main. Restore it to undo the divergence.' }
     if (-not $Tl.IsActive -and $Tl.Kind -ne 'daily') { $msg += '  You are not currently playing this one.' }
     $StatusText.Text = $msg
 }
@@ -425,8 +521,7 @@ $ForkBtn.Add_Click({
     $tl   = $script:CurrentTimeline
     if (-not $game -or -not $c -or -not $tl) { return }
 
-    $name = [Microsoft.VisualBasic.Interaction]::InputBox(
-        "Name this save branch for $($game.Name).`n`nIt starts at:`n$($c.Label)", 'Fork timeline', '')
+    $name = Show-BranchDialog $window $game.AppId $game.Name $c.Label
     if (-not $name) { return }
 
     $prevActive = Get-ActiveTimeline $game.AppId
