@@ -40,6 +40,7 @@ $userdata  = Join-Path $steamRoot 'userdata'
 Initialize-Repo
 $names = Get-GameNames $steamRoot
 Write-GamesJson $names
+Write-GamesIndex $names
 Set-TimelineGameNames $names
 
 # Branches carry the game name as well as the appid. Older mirrors used the

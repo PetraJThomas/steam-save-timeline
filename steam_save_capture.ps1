@@ -34,6 +34,45 @@ function Write-GamesJson([hashtable]$Names) {
     $Names | ConvertTo-Json | Set-Content (Join-Path $script:CapMirror 'games.json') -Encoding UTF8
 }
 
+function Write-GamesIndex([hashtable]$Names) {
+    <#
+    The same map, written for a person rather than a parser.
+
+    Steam identifies a game only by number, and the mirror's folders are named
+    that way because that path is inside every commit's tree; renaming it would
+    fragment history. So the number stays and this sits beside it. Open the
+    mirror, or clone the second copy onto a bare machine, and you can tell which
+    game is which without running anything or searching for the id online.
+    #>
+    $rows = @()
+    foreach ($ref in @(Get-GitOutput @('for-each-ref', '--format=%(refname:short)', 'refs/heads/game/*/main'))) {
+        $ref = ([string]$ref).Trim()
+        if (-not $ref) { continue }
+        $root  = $ref.Substring(0, $ref.LastIndexOf('/'))
+        $appId = ($root -split '-')[-1]
+        if ($appId -notmatch '^\d+$') { $appId = ($root -split '/')[-1] }
+        $name  = if ($Names.ContainsKey($appId)) { [string]$Names[$appId] } else { "app $appId" }
+        $rows += [pscustomobject]@{ Name = $name; AppId = $appId; Root = $root }
+    }
+
+    $md  = @('# Games in this timeline', '')
+    $md += 'Written by the watcher. Steam identifies a game only by its App ID, which is'
+    $md += 'also what the folders in here are called. This maps them back to something'
+    $md += 'readable.'
+    $md += ''
+    $md += '| Game | App ID | Folder | Timeline |'
+    $md += '| --- | --- | --- | --- |'
+    foreach ($r in ($rows | Sort-Object Name)) {
+        $md += "| $($r.Name) | $($r.AppId) | ``$($r.AppId)/`` | ``$($r.Root)/main`` |"
+    }
+    $md += ''
+    $md += 'To pull one file back by hand: find the game above, then'
+    $md += ''
+    $md += '    git log <timeline>'
+    $md += '    git checkout <commit> -- <appid>/remote/<file>'
+    ($md -join "`r`n") | Set-Content (Join-Path $script:CapMirror 'GAMES.md') -Encoding UTF8
+}
+
 function Initialize-Repo {
     New-Item -ItemType Directory -Path $script:CapMirror -Force | Out-Null
     if (-not (Test-Path (Join-Path $script:CapMirror '.git'))) {
@@ -175,6 +214,7 @@ function Invoke-Sweep {
         }
     }
     Write-GamesJson $Names
+    Write-GamesIndex $Names
     Save-Metadata | Out-Null
     return $caches.Count
 }

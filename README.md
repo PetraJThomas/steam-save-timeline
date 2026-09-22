@@ -151,11 +151,18 @@ syncs. The daily timeline is an archive and is never the timeline you are
    **LOCAL**, and your restored save uploads over the bad cloud copy.
 5. The watcher records that upload too, so even the recovery is in the timeline.
 
-Per-file restores work from the command line:
+Per-file restores work from the command line. Steam identifies a game only by
+its App ID, so start from the name:
 
 ```powershell
-git checkout <commit> -- <appid>/remote/<file>
+git branch --list "*kayak*"          # -> game/kayak-vr-mirage-1683340/main
+git log game/kayak-vr-mirage-1683340/main
+git checkout <commit> -- 1683340/remote/<file>
 ```
+
+`GAMES.md` at the root of the mirror is the same lookup as a table, written on
+every sweep, so a clone of your second copy tells you which game each numbered
+folder is without needing this tool or an internet search.
 
 ### Save branches
 

@@ -193,7 +193,7 @@ function Set-ActiveTimeline([string]$AppId, [string]$Branch) {
 function Save-Metadata {
     # games.json / timelines.json live on the metadata branch, not on any game's
     # timeline, they are repo-level and would otherwise churn every game's log.
-    $commit = New-PathCommit @('games.json', 'timelines.json', '.gitattributes') (Get-MetaBranch) 'metadata'
+    $commit = New-PathCommit @('games.json', 'GAMES.md', 'timelines.json', '.gitattributes') (Get-MetaBranch) 'metadata'
 
     # Push it too. A snapshot only pushes the branch it just wrote, so without
     # this the second copy keeps every save but freezes its game names and its
