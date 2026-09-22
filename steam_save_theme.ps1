@@ -18,8 +18,9 @@ $SteamSaveTheme = @'
     <SolidColorBrush x:Key="Panel2" Color="#1D2430"/>
     <SolidColorBrush x:Key="Hover"  Color="#243040"/>
     <SolidColorBrush x:Key="Line"   Color="#2A3341"/>
+    <SolidColorBrush x:Key="BtnLine" Color="#5A6A80"/>
     <SolidColorBrush x:Key="Text"   Color="#E8EDF4"/>
-    <SolidColorBrush x:Key="Muted"  Color="#8391A5"/>
+    <SolidColorBrush x:Key="Muted"  Color="#93A1B5"/>
     <SolidColorBrush x:Key="Accent" Color="#66C0F4"/>
     <SolidColorBrush x:Key="Good"   Color="#7BD88F"/>
     <SolidColorBrush x:Key="ForkC"  Color="#C792EA"/>
@@ -33,7 +34,7 @@ $SteamSaveTheme = @'
     <Style x:Key="Btn" TargetType="Button">
       <Setter Property="Background"  Value="{StaticResource Panel2}"/>
       <Setter Property="Foreground"  Value="{StaticResource Text}"/>
-      <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BtnLine}"/>
       <Setter Property="FontFamily"  Value="Segoe UI"/>
       <Setter Property="FontSize"    Value="12"/>
       <Setter Property="Padding"     Value="14,7"/>
@@ -51,6 +52,9 @@ $SteamSaveTheme = @'
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource Hover}"/>
                 <Setter TargetName="bd" Property="BorderBrush" Value="#3C4A5C"/>
               </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="#161D27"/>
+              </Trigger>
               <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Opacity" Value="0.3"/>
               </Trigger>
@@ -60,12 +64,61 @@ $SteamSaveTheme = @'
       </Setter>
     </Style>
 
-    <Style x:Key="BtnPrimary" TargetType="Button" BasedOn="{StaticResource Btn}">
+    <!--
+      The primary button needs its OWN template. Inheriting the one above via
+      BasedOn meant its hover trigger set the background to the dark slate
+      Hover brush, so the bright blue button turned grey under the cursor.
+
+      Solid bright button, so it shades toward black on hover the way Bootstrap
+      does rather than lightening: 30% shade (x0.70) on hover, 45% (x0.55) on
+      press. #66C0F4 -> #4786AB -> #386A86. The dark label still clears AA on
+      the hover shade (about 4.8:1).
+    -->
+    <Style x:Key="BtnPrimary" TargetType="Button">
       <Setter Property="Background"  Value="{StaticResource Accent}"/>
       <Setter Property="Foreground"  Value="#0B1017"/>
       <Setter Property="BorderBrush" Value="{StaticResource Accent}"/>
+      <Setter Property="FontFamily"  Value="Segoe UI"/>
+      <Setter Property="FontSize"    Value="12"/>
       <Setter Property="FontWeight"  Value="SemiBold"/>
       <Setter Property="Padding"     Value="18,9"/>
+      <Setter Property="Cursor"      Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="pb" CornerRadius="4" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+              <ContentPresenter Margin="{TemplateBinding Padding}"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="pb" Property="Background"  Value="#4786AB"/>
+                <Setter TargetName="pb" Property="BorderBrush" Value="#4786AB"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="pb" Property="Background"  Value="#4786AB"/>
+                <Setter TargetName="pb" Property="BorderBrush" Value="#27536B"/>
+                <Setter TargetName="pb" Property="BorderThickness" Value="2"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.3"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!--
+      Icons come from the system icon font: Segoe Fluent Icons ships with
+      Windows 11, Segoe MDL2 Assets with 10. Naming both means nothing to
+      install and no tofu on either. Every glyph used was rendered and eyeballed
+      before being committed, because a wrong codepoint is a blank box.
+    -->
+    <Style x:Key="Icon" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+      <Setter Property="FontFamily"        Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
 
     <!-- timeline pills -->
@@ -78,7 +131,7 @@ $SteamSaveTheme = @'
         <Setter.Value>
           <ControlTemplate TargetType="RadioButton">
             <Border x:Name="bd" CornerRadius="12" Background="{StaticResource Panel2}"
-                    BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="13,5">
+                    BorderBrush="{StaticResource BtnLine}" BorderThickness="1" Padding="13,5">
               <ContentPresenter VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
@@ -157,7 +210,7 @@ $SteamSaveTheme = @'
       <Setter Property="Background"      Value="{StaticResource Panel2}"/>
       <Setter Property="Foreground"      Value="{StaticResource Text}"/>
       <Setter Property="CaretBrush"      Value="{StaticResource Accent}"/>
-      <Setter Property="BorderBrush"     Value="{StaticResource Line}"/>
+      <Setter Property="BorderBrush"     Value="{StaticResource BtnLine}"/>
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="Padding"         Value="7,5"/>
       <Setter Property="FontFamily"      Value="Segoe UI"/>

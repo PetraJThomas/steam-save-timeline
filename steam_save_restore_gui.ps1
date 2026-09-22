@@ -29,10 +29,43 @@ $MirrorDir = Join-Path $env:USERPROFILE 'steam-save-history'
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework
 
-. (Join-Path $PSScriptRoot 'steam_save_theme.ps1')
+. (Join-Path $PSScriptRoot 'steam_save_dialogs.ps1')  # brings the theme with it
 . (Join-Path $PSScriptRoot 'steam_save_roots.ps1')
 . (Join-Path $PSScriptRoot 'steam_save_timelines.ps1') # supplies Invoke-Git / Get-GitOutput
 Initialize-Timelines $MirrorDir
+
+# A timeline row. A real notifying type rather than a PSCustomObject because the
+# file list is loaded only when the row is opened, and the summary line has to
+# appear when it arrives. Files is observable for the same reason.
+if (-not ('TimelinePoint' -as [type])) {
+    Add-Type @'
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+public class TimelinePoint : INotifyPropertyChanged {
+    public event PropertyChangedEventHandler PropertyChanged;
+    void Raise(string p) {
+        var h = PropertyChanged;
+        if (h != null) h(this, new PropertyChangedEventArgs(p));
+    }
+    public string Hash { get; set; }
+    public string When { get; set; }
+    public string Kind { get; set; }
+    public object KindBrush { get; set; }
+    public object KindFg { get; set; }
+    public string Detail { get; set; }
+    public object ForkVis { get; set; }
+    public string Label { get; set; }
+    public bool Loaded { get; set; }
+    public ObservableCollection<object> Files { get; private set; }
+    string summary = "";
+    public string Summary {
+        get { return summary; }
+        set { summary = value; Raise("Summary"); }
+    }
+    public TimelinePoint() { Files = new ObservableCollection<object>(); }
+}
+'@
+}
 
 function New-Brush([string]$Hex) {
     $b = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString($Hex))
@@ -42,10 +75,20 @@ function New-Brush([string]$Hex) {
 # One colour per kind of event, so a timeline can be read at a glance.
 $script:KindBrush = @{
     SYNC      = New-Brush '#66C0F4'   # Steam actually moved data
-    SNAPSHOT  = New-Brush '#5E6E84'   # a sweep found this on disk
+    SNAPSHOT  = New-Brush '#55637A'   # a sweep found this on disk
     RESTORE   = New-Brush '#F2C14E'
     CANONICAL = New-Brush '#7BD88F'
     CREATED   = New-Brush '#4A5666'
+}
+# The label colour follows its fill instead of being fixed dark. Fixed dark put
+# SNAPSHOT at 3.67:1 and CREATED at 2.56:1, both under AA, because those two are
+# deliberately dim. Light labels on the dim fills, dark on the bright ones.
+$script:KindFg = @{
+    SYNC      = New-Brush '#0B1017'
+    SNAPSHOT  = New-Brush '#E8EDF4'
+    RESTORE   = New-Brush '#0B1017'
+    CANONICAL = New-Brush '#0B1017'
+    CREATED   = New-Brush '#E8EDF4'
 }
 
 function Get-Timeline([string]$AppId, [string]$Branch) {
@@ -67,15 +110,46 @@ function Get-Timeline([string]$AppId, [string]$Branch) {
         $detail = ($detail -replace '^\((.*)\)$', '$1').Trim()
 
         $isFork = [bool]($fork -and $h -eq $fork)
+        $pt = New-Object TimelinePoint
+        $pt.Hash      = $h
+        $pt.When      = ([datetime]$date).ToString('yyyy-MM-dd  HH:mm')
+        $pt.Kind      = $kind
+        $pt.KindBrush = $script:KindBrush[$kind]
+        $pt.KindFg    = $script:KindFg[$kind]
+        $pt.Detail    = $detail
+        $pt.ForkVis   = $(if ($isFork) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed })
+        # trimmed: an empty detail otherwise leaves a trailing space that shows
+        # up as "... CREATED ." when the label is dropped into a sentence
+        $pt.Label     = ("{0}  {1} {2}" -f ([datetime]$date).ToString('yyyy-MM-dd HH:mm'), $kind, $detail).Trim()
+        $pt
+    }
+}
+
+function Format-Bytes([int64]$n) {
+    if ($n -ge 1MB) { return ('{0:N1} MB' -f ($n / 1MB)) }
+    if ($n -ge 1KB) { return ('{0:N1} KB' -f ($n / 1KB)) }
+    return "$n B"
+}
+
+function Get-PointFiles([string]$AppId, [string]$Hash) {
+    <#
+    What this point actually holds, straight out of the remotecache.vdf that was
+    committed alongside it. Steam's own record: name, size, and when it was last
+    written. That is the evidence you want when picking a restore point, because
+    a save that suddenly dropped to 2 KB is the reset one.
+    #>
+    $text = (Get-GitOutput @('show', "${Hash}:$AppId/remotecache.vdf")) -join "`n"
+    if (-not $text.Trim()) { return @() }
+    $rootNames = @{}
+    foreach ($e in (ConvertFrom-RemoteCacheText $text)) {
+        $rn = Get-SteamRootName $e.Root
+        if (-not $rn) { $rn = "root $($e.Root)" }
         [pscustomobject]@{
-            Hash      = $h
-            When      = ([datetime]$date).ToString('yyyy-MM-dd  HH:mm')
-            Kind      = $kind
-            KindBrush = $script:KindBrush[$kind]
-            Detail    = $detail
-            IsFork    = $isFork
-            ForkVis   = $(if ($isFork) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed })
-            Label     = "{0}  {1} {2}" -f ([datetime]$date).ToString('yyyy-MM-dd HH:mm'), $kind, $detail
+            Name     = Split-Path $e.RelPath -Leaf
+            Where    = "$rn\$(Split-Path $e.RelPath -Parent)".TrimEnd('\')
+            Size     = Format-Bytes $e.Size
+            Bytes    = $e.Size
+            Modified = $(if ($e.Modified) { $e.Modified.ToString('yyyy-MM-dd HH:mm') } else { 'never downloaded' })
         }
     }
 }
@@ -240,10 +314,12 @@ function Get-RestorePlan([string]$AppId, [string]$Hash, [string]$SteamRoot) {
 function Restore-Save([string]$AppId, [string]$Hash, [string]$GameName, [string]$SteamRoot, $Plan) {
     # 1. Steam-running gate
     if (Test-SteamRunning) {
-        $r = [System.Windows.MessageBox]::Show(
-            "Steam is currently running.`n`nRestoring while Steam is open risks the cloud syncing right back over your restored files before you get the conflict prompt.`n`nClose Steam now and continue?",
-            'Steam is running', 'YesNo', 'Warning')
-        if ($r -ne 'Yes') { return 'Cancelled. Close Steam and try again.' }
+        $r = Show-ConfirmDialog -Owner $window -Title 'Steam is running' `
+            -Headline 'Steam is running' `
+            -Body 'Restoring while Steam is open risks the cloud syncing straight back over your restored files before you ever see the conflict prompt.' `
+            -Note 'Steam will be asked to shut down cleanly first.' `
+            -Tone 'warn' -ConfirmLabel 'Close Steam and restore' -CancelLabel 'Cancel'
+        if (-not $r) { return 'Cancelled. Close Steam and try again.' }
         if (-not (Close-Steam $SteamRoot)) { return 'Steam did not shut down in time. Close it manually, then retry.' }
     }
 
@@ -278,14 +354,20 @@ function Invoke-RestoreFlow($Game, [string]$Hash, [string]$Label, [string]$Steam
     $plan = @(Get-RestorePlan $Game.AppId $Hash $SteamRoot)
     if ($plan.Count -eq 0) { return 'Nothing to restore at that point.' }
 
-    $lines = foreach ($p in $plan) {
-        if ($p.Dest) { "  $($p.Root)  ->  $($p.Dest)" } else { "  $($p.Root)  ->  (unresolved, will be skipped)" }
+    $rows = foreach ($p in $plan) {
+        [pscustomobject]@{
+            Head = $p.Root
+            Sub  = $(if ($p.Dest) { $p.Dest } else { 'no path on this PC, will be skipped' })
+        }
     }
     $active = Get-TimelineLabel $Game.AppId (Get-ActiveTimeline $Game.AppId)
-    $confirm = [System.Windows.MessageBox]::Show(
-        "Restore $($Game.Name) to:`n$Label`n`nThis will overwrite files in:`n$($lines -join "`n")`n`nThe restore is committed on the '$active' timeline; the state it replaces stays in history.",
-        'Confirm restore', 'YesNo', 'Question')
-    if ($confirm -ne 'Yes') { return 'Cancelled.' }
+    $ok = Show-ConfirmDialog -Owner $window -Title 'Confirm restore' `
+        -Headline "Restore $($Game.Name)?" `
+        -Body "Back to $Label." `
+        -RowsCaption 'WILL OVERWRITE FILES IN' -Rows $rows `
+        -Note "Committed on the '$active' timeline, so the state it replaces stays in history and this is undoable." `
+        -Tone 'warn' -ConfirmLabel 'Restore' -CancelLabel 'Cancel'
+    if (-not $ok) { return 'Cancelled.' }
 
     return (Restore-Save $Game.AppId $Hash $Game.Name $SteamRoot $plan)
 }
@@ -324,8 +406,14 @@ $SteamSaveTheme
       <!-- games -->
       <Border Grid.Column="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
         <DockPanel Margin="10,12,10,10">
-          <TextBlock DockPanel.Dock="Top" Text="GAMES" FontSize="10" FontWeight="SemiBold"
-                     Foreground="{StaticResource Muted}" Margin="6,0,0,8"/>
+          <!-- icon and label are separate TextBlocks: the icon font has no
+               Latin glyphs, so putting "GAMES" in it renders as boxes -->
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="6,0,0,8">
+            <TextBlock Style="{StaticResource Icon}" Text="&#xE7FC;" FontSize="12"
+                       Foreground="{StaticResource Muted}" Margin="0,0,7,0"/>
+            <TextBlock Text="GAMES" FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"
+                       Foreground="{StaticResource Muted}"/>
+          </StackPanel>
           <ListBox Name="GameList" Style="{StaticResource List}" ItemContainerStyle="{StaticResource Row}">
             <ListBox.ItemTemplate>
               <DataTemplate>
@@ -350,9 +438,9 @@ $SteamSaveTheme
 
           <DockPanel Margin="0,12,0,10" LastChildFill="False">
             <WrapPanel Name="TimelineBar" DockPanel.Dock="Left" Orientation="Horizontal"/>
-            <Button Name="CanonicalBtn" Content="Make canonical" Style="{StaticResource Btn}" DockPanel.Dock="Right" Margin="6,0,0,0" IsEnabled="False"/>
-            <Button Name="SwitchBtn"    Content="Play this one"  Style="{StaticResource Btn}" DockPanel.Dock="Right" Margin="6,0,0,0" IsEnabled="False"/>
-            <Button Name="ForkBtn"      Content="Branch / Diverge Save" Style="{StaticResource Btn}" DockPanel.Dock="Right" Padding="16,7" IsEnabled="False"/>
+            <Button Name="CanonicalBtn" Style="{StaticResource Btn}" DockPanel.Dock="Right" Margin="6,0,0,0" IsEnabled="False"><StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Icon}" Text="&#xE73E;" FontSize="13" Margin="0,0,8,0"/><TextBlock Text="Make canonical"/></StackPanel></Button>
+            <Button Name="SwitchBtn" Style="{StaticResource Btn}" DockPanel.Dock="Right" Margin="6,0,0,0" IsEnabled="False"><StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Icon}" Text="&#xE768;" FontSize="13" Margin="0,0,8,0"/><TextBlock Text="Play this one"/></StackPanel></Button>
+            <Button Name="ForkBtn" Style="{StaticResource Btn}" DockPanel.Dock="Right" Padding="16,7" IsEnabled="False"><StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Icon}" Text="&#xE8AB;" FontSize="13" Margin="0,0,8,0"/><TextBlock Text="Branch / Diverge Save"/></StackPanel></Button>
           </DockPanel>
         </StackPanel>
 
@@ -364,27 +452,71 @@ $SteamSaveTheme
           <ListBox Name="TimelineList" Style="{StaticResource List}" ItemContainerStyle="{StaticResource Row}">
             <ListBox.ItemTemplate>
               <DataTemplate>
-                <Grid>
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                  </Grid.ColumnDefinitions>
-                  <Border Grid.Column="0" Background="{Binding KindBrush}" CornerRadius="3"
-                          Padding="7,2" MinWidth="78">
-                    <TextBlock Text="{Binding Kind}" FontSize="9.5" FontWeight="Bold" Foreground="#0B1017"
-                               HorizontalAlignment="Center"/>
-                  </Border>
-                  <TextBlock Grid.Column="1" Text="{Binding When}" Margin="12,0,0,0" VerticalAlignment="Center"
-                             FontFamily="Consolas" FontSize="12" Foreground="{StaticResource Muted}"/>
-                  <TextBlock Grid.Column="2" Text="{Binding Detail}" Margin="14,0,8,0" VerticalAlignment="Center"
-                             FontSize="12" TextTrimming="CharacterEllipsis"/>
-                  <Border Grid.Column="3" Visibility="{Binding ForkVis}" CornerRadius="3" Padding="7,2"
-                          Background="#2B2039" BorderBrush="{StaticResource ForkC}" BorderThickness="1">
-                    <TextBlock Text="DIVERGED HERE" FontSize="9.5" FontWeight="Bold" Foreground="{StaticResource ForkC}"/>
-                  </Border>
-                </Grid>
+                <StackPanel>
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto"/>
+                      <ColumnDefinition Width="Auto"/>
+                      <ColumnDefinition Width="Auto"/>
+                      <ColumnDefinition Width="*"/>
+                      <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Name="Chev" Grid.Column="0" Style="{StaticResource Icon}" Text="&#xE76C;" FontSize="11" Width="16"
+                               VerticalAlignment="Center" Foreground="{StaticResource Muted}"/>
+                    <Border Grid.Column="1" Background="{Binding KindBrush}" CornerRadius="3"
+                            Padding="7,2" MinWidth="78">
+                      <TextBlock Text="{Binding Kind}" FontSize="9.5" FontWeight="Bold" Foreground="{Binding KindFg}"
+                                 HorizontalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Grid.Column="2" Text="{Binding When}" Margin="12,0,0,0" VerticalAlignment="Center"
+                               FontFamily="Consolas" FontSize="12" Foreground="{StaticResource Muted}"/>
+                    <TextBlock Grid.Column="3" Text="{Binding Detail}" Margin="14,0,8,0" VerticalAlignment="Center"
+                               FontSize="12" TextTrimming="CharacterEllipsis"/>
+                    <Border Grid.Column="4" Visibility="{Binding ForkVis}" CornerRadius="3" Padding="7,2"
+                            Background="#2B2039" BorderBrush="{StaticResource ForkC}" BorderThickness="1">
+                      <TextBlock Text="DIVERGED HERE" FontSize="9.5" FontWeight="Bold" Foreground="{StaticResource ForkC}"/>
+                    </Border>
+                  </Grid>
+
+                  <!-- opens on selection: one click gives both the evidence and
+                       the restore target, so nothing needs a separate hit area -->
+                  <StackPanel Name="Detail" Visibility="Collapsed" Margin="14,9,0,3">
+                    <TextBlock Text="{Binding Summary}" FontSize="10.5" FontWeight="SemiBold"
+                               Foreground="{StaticResource Muted}" Margin="0,0,0,6"/>
+                    <ItemsControl ItemsSource="{Binding Files}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Grid Margin="0,0,0,5">
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="*"/>
+                              <ColumnDefinition Width="Auto"/>
+                              <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                              <TextBlock Text="{Binding Name}" FontSize="11.5"/>
+                              <TextBlock Text="{Binding Where}" FontSize="10" FontFamily="Consolas"
+                                         Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="{Binding Size}" FontFamily="Consolas" FontSize="11"
+                                       MinWidth="66" TextAlignment="Right" VerticalAlignment="Center"
+                                       Foreground="{StaticResource Accent}"/>
+                            <TextBlock Grid.Column="2" Text="{Binding Modified}" FontFamily="Consolas" FontSize="11"
+                                       Margin="14,0,0,0" VerticalAlignment="Center"
+                                       Foreground="{StaticResource Muted}"/>
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </StackPanel>
+
+                <DataTemplate.Triggers>
+                  <DataTrigger Value="True"
+                               Binding="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=IsSelected}">
+                    <Setter TargetName="Detail" Property="Visibility" Value="Visible"/>
+                    <Setter TargetName="Chev" Property="Text" Value="&#xE70D;"/>
+                  </DataTrigger>
+                </DataTemplate.Triggers>
               </DataTemplate>
             </ListBox.ItemTemplate>
           </ListBox>
@@ -396,8 +528,13 @@ $SteamSaveTheme
     <!-- footer -->
     <Border Grid.Row="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="18,12">
       <DockPanel LastChildFill="True">
-        <Button Name="RestoreBtn" Content="Restore selected point" Style="{StaticResource BtnPrimary}"
-                DockPanel.Dock="Right" Margin="14,0,0,0" IsEnabled="False"/>
+        <Button Name="RestoreBtn" Style="{StaticResource BtnPrimary}"
+                DockPanel.Dock="Right" Margin="14,0,0,0" IsEnabled="False">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Style="{StaticResource Icon}" Text="&#xE81C;" FontSize="14" Margin="0,0,9,0" Foreground="#0B1017"/>
+            <TextBlock Text="Restore selected point" Foreground="#0B1017" FontWeight="SemiBold"/>
+          </StackPanel>
+        </Button>
         <TextBlock Name="StatusText" VerticalAlignment="Center" TextWrapping="Wrap" FontSize="12"
                    Foreground="{StaticResource Muted}" Text="Select a game, then a point in its timeline."/>
       </DockPanel>
@@ -501,9 +638,24 @@ $GameList.Add_SelectionChanged({
 })
 
 $TimelineList.Add_SelectionChanged({
-    $has = ($null -ne $TimelineList.SelectedItem)
-    $RestoreBtn.IsEnabled = $has
-    $ForkBtn.IsEnabled    = $has
+    $sel = $TimelineList.SelectedItem
+    $RestoreBtn.IsEnabled = ($null -ne $sel)
+    $ForkBtn.IsEnabled    = ($null -ne $sel)
+
+    # Opening a row is what loads its file list. Doing it up front would mean a
+    # git show per commit just to draw the timeline.
+    $game = $GameList.SelectedItem
+    if ($sel -and $game -and -not $sel.Loaded) {
+        $sel.Loaded = $true
+        $files = @(Get-PointFiles $game.AppId $sel.Hash)
+        foreach ($f in $files) { [void]$sel.Files.Add($f) }
+        if ($files.Count -gt 0) {
+            $total = [int64](($files | Measure-Object -Property Bytes -Sum).Sum)
+            $sel.Summary = "$($files.Count) FILE(S), $(Format-Bytes $total) TOTAL"
+        } else {
+            $sel.Summary = 'NO FILE LIST RECORDED AT THIS POINT'
+        }
+    }
 })
 
 $RestoreBtn.Add_Click({
@@ -532,10 +684,11 @@ $ForkBtn.Add_Click({
     if ($c.Hash -eq $prevTip) {
         $StatusText.Text = "Timeline '$($r.Slug)' created from the current save and is now active. Play on, new syncs go here, main is untouched."
     } else {
-        $load = [System.Windows.MessageBox]::Show(
-            "Timeline '$($r.Slug)' created and is now active.`n`nIt starts at an earlier point than your current save. Load that save into Steam now?",
-            'Load the fork point?', 'YesNo', 'Question')
-        if ($load -eq 'Yes') { $StatusText.Text = Invoke-RestoreFlow $game $c.Hash $c.Label $steamRoot }
+        $load = Show-ConfirmDialog -Owner $window -Title 'Load that point?' `
+            -Headline "'$($r.Slug)' created and now active" `
+            -Body 'It starts at an earlier point than the save Steam currently holds. Load that save in now, so you are actually playing this branch?' `
+            -ConfirmLabel 'Load it now' -CancelLabel 'Later'
+        if ($load) { $StatusText.Text = Invoke-RestoreFlow $game $c.Hash $c.Label $steamRoot }
         else { $StatusText.Text = "Timeline '$($r.Slug)' is active, but Steam still holds your other save. Restore that point when you want to play it." }
     }
     Reload $game
@@ -548,10 +701,11 @@ $SwitchBtn.Add_Click({
     $tip = Get-GitLine @('rev-parse', $tl.Branch)
     if (-not $tip) { $StatusText.Text = 'That timeline has no commits yet.'; return }
 
-    $confirm = [System.Windows.MessageBox]::Show(
-        "Play '$($tl.Label)' for $($game.Name)?`n`nNew syncs will be recorded there, and its latest save will be loaded into Steam.",
-        'Switch timeline', 'YesNo', 'Question')
-    if ($confirm -ne 'Yes') { return }
+    $confirm = Show-ConfirmDialog -Owner $window -Title 'Switch timeline' `
+        -Headline "Play '$($tl.Label)'?" `
+        -Body "New syncs for $($game.Name) will be recorded on it, and its latest save will be loaded into Steam." `
+        -ConfirmLabel 'Play this one' -CancelLabel 'Cancel'
+    if (-not $confirm) { return }
 
     Set-ActiveTimeline $game.AppId $tl.Branch
     $StatusText.Text = Invoke-RestoreFlow $game $tip "latest point on '$($tl.Label)'" $steamRoot
@@ -563,10 +717,12 @@ $CanonicalBtn.Add_Click({
     $tl   = $script:CurrentTimeline
     if (-not $game -or -not $tl) { return }
 
-    $confirm = [System.Windows.MessageBox]::Show(
-        "Make '$($tl.Label)' the canonical save for $($game.Name)?`n`nIts current state is committed onto main as a new point, and main goes back to being the timeline you play. Nothing is rewritten, main keeps its history and '$($tl.Label)' is kept too.",
-        'Make canonical', 'YesNo', 'Question')
-    if ($confirm -ne 'Yes') { return }
+    $confirm = Show-ConfirmDialog -Owner $window -Title 'Make canonical' `
+        -Headline "Make '$($tl.Label)' the canonical save?" `
+        -Body 'Its current state is committed onto main as a new point, and main goes back to being the timeline you play.' `
+        -Note "Nothing is rewritten: main keeps its whole history, and '$($tl.Label)' is kept in case it turns out to have been the better run." `
+        -ConfirmLabel 'Make canonical' -CancelLabel 'Cancel'
+    if (-not $confirm) { return }
 
     $r = Invoke-MakeCanonical $game.AppId $tl.Branch $game.Name
     if (-not $r.Ok) { $StatusText.Text = $r.Message; return }

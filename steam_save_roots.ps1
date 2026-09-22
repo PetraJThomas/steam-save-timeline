@@ -234,12 +234,21 @@ function Find-SteamRootBaseByProbe {
 
 # ---------------- the ledger ----------------
 
-function Read-RemoteCache([string]$CachePath) {
+function ConvertFrom-UnixTime([string]$Seconds) {
+    if (-not $Seconds -or $Seconds -eq '0') { return $null }
+    try { return [DateTimeOffset]::FromUnixTimeSeconds([int64]$Seconds).ToLocalTime().DateTime } catch { return $null }
+}
+
+function ConvertFrom-RemoteCacheText([string]$Text) {
     <#
     Entries of a remotecache.vdf / remotecache.vcf, one object per cloud file.
     RelPath is the path Steam stores, relative to that entry's own root.
+
+    Takes text rather than a path so the GUI can feed it straight from
+    `git show <commit>:<appid>/remotecache.vdf` and read the file list of a
+    point in history without checking anything out.
     #>
-    $doc = ConvertFrom-Vdf (Get-Content $CachePath -Raw -Encoding UTF8)
+    $doc = ConvertFrom-Vdf $Text
     $app = $null
     foreach ($k in @($doc.Keys)) {
         if ($doc[$k] -is [System.Collections.IDictionary]) { $app = $doc[$k]; break }
@@ -251,14 +260,20 @@ function Read-RemoteCache([string]$CachePath) {
         $e = $app[$k]
         if (-not ($e -is [System.Collections.IDictionary])) { continue }   # ChangeNumber, OSType
         $out += [pscustomobject]@{
-            RelPath = ($k -replace '/', '\')
-            Root    = [int]$e['root']
-            Size    = [int64]$e['size']
-            Sha     = [string]$e['sha']
-            Sync    = [string]$e['syncstate']
+            RelPath    = ($k -replace '/', '\')
+            Root       = [int]$e['root']
+            Size       = [int64]$e['size']
+            Sha        = [string]$e['sha']
+            Sync       = [string]$e['syncstate']
+            Modified   = ConvertFrom-UnixTime ([string]$e['time'])
+            RemoteTime = ConvertFrom-UnixTime ([string]$e['remotetime'])
         }
     }
     return $out
+}
+
+function Read-RemoteCache([string]$CachePath) {
+    return (ConvertFrom-RemoteCacheText (Get-Content $CachePath -Raw -Encoding UTF8))
 }
 
 function Get-SaveFileMap {

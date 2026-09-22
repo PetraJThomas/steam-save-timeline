@@ -133,7 +133,10 @@ syncs. The daily timeline is an archive and is never the timeline you are
 
 ### Restoring a save
 
-1. Open the timeline browser, pick the game, pick the point.
+1. Open the timeline browser, pick the game, pick the point. Opening a point
+   lists exactly what it holds: every file, its size, and when it was last
+   written. That is how you spot the bad save, because the one that dropped
+   to 2 KB is the reset.
 2. It shows you **every directory it is about to overwrite** before touching
    anything. A restore can write into AppData, Documents or a game's install
    folder, and you should see that first.
@@ -233,6 +236,18 @@ hotkey host. Setup offers Task Scheduler instead if you would rather have no
 tray icon, and the scripts work perfectly well with neither.
 
 ---
+
+## Accessibility
+
+The interface is audited against **WCAG 2.2 AA**, not by eye. `contrast-check.ps1`
+walks an inventory of every piece of UI copy with its real size and weight and
+checks it against 1.4.3 (4.5:1 normal text, 3:1 large) and 1.4.11 (3:1 for
+meaningful icons and for the boundaries of interactive components). All 77
+checks pass. Static card outlines are recorded as decorative and reported as
+out of scope rather than being quietly left out of the list.
+
+Icons come from the system icon font (Segoe Fluent Icons, falling back to Segoe
+MDL2 Assets), so there is nothing to install and no missing-glyph boxes.
 
 ## Known limitations
 

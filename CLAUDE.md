@@ -38,6 +38,25 @@ user-facing doc; this file is the working notes.
   into both windows. Not a ResourceDictionary file: keeping it a string
   means no extra file to ship and the two windows cannot drift apart.
 
+- `steam_save_dialogs.ps1`, themed confirm/notice dialogs shared by both
+  windows. MessageBox.Show is gone from the project: it could not show the
+  restore confirmation's LIST of directories about to be overwritten, which is
+  the thing worth reading slowly before saying yes.
+
+- `contrast-check.ps1`, WCAG 2.2 AA audit of every piece of UI copy, with its
+  real size and weight. Run it after ANY theme change; it exits non-zero on
+  failure. Rules that bit: dark-on-accent cannot survive past about a 32%
+  shade, which is why the primary button's pressed state keeps the hover fill
+  and shows itself with a rim instead of going darker. Badge label colour
+  follows its fill rather than being fixed dark, because the dim SNAPSHOT and
+  CREATED fills failed at 3.67:1 and 2.56:1.
+
+- Icons are the system icon font ("Segoe Fluent Icons, Segoe MDL2 Assets"), so
+  nothing ships and nothing is missing on Win10 or 11. Two rules: render any new
+  glyph and LOOK at it before committing, since a wrong codepoint is a silent
+  blank box; and never put Latin text in an icon-font TextBlock, because the
+  font has no letters and "GAMES" came out as five boxes.
+
 - `run-hidden.vbs`, a three-line WScript shim. Everything launched from a
   shortcut or the log-on task goes through it, because
   `powershell -WindowStyle Hidden` still creates and paints a console for a

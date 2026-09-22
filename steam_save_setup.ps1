@@ -419,11 +419,13 @@ function Write-Log([string]$Message) {
 }
 
 function Add-Check([string]$State, [string]$Label, [string]$Detail, [string]$ActionLabel, [scriptblock]$Action) {
+    # System icon font, so these match the rest of the app rather than being
+    # whatever the text font happens to draw for a dingbat.
     $glyph, $colour = switch ($State) {
-        'ok'   { [char]0x2713, '#7BD88F' }
-        'warn' { [char]0x26A0, '#F2C14E' }
-        'fail' { [char]0x2717, '#E06C6C' }
-        default { [char]0x2022, '#66C0F4' }
+        'ok'   { [char]0xE73E, '#7BD88F' }   # accept
+        'warn' { [char]0xE7BA, '#F2C14E' }   # warning
+        'fail' { [char]0xE711, '#E06C6C' }   # cancel
+        default { [char]0xE946, '#66C0F4' }  # info
     }
     $row = New-Object System.Windows.Controls.Grid
     $row.Margin = '0,3'
@@ -436,7 +438,8 @@ function Add-Check([string]$State, [string]$Label, [string]$Detail, [string]$Act
     $g = New-Object System.Windows.Controls.TextBlock
     $g.Text = [string]$glyph
     $g.Foreground = (New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($colour)))
-    $g.FontSize = 13; $g.Width = 20; $g.VerticalAlignment = 'Center'
+    $g.FontFamily = New-Object System.Windows.Media.FontFamily 'Segoe Fluent Icons, Segoe MDL2 Assets'
+    $g.FontSize = 14; $g.Width = 22; $g.VerticalAlignment = 'Center'
     [System.Windows.Controls.Grid]::SetColumn($g, 0); [void]$row.Children.Add($g)
 
     $l = New-Object System.Windows.Controls.TextBlock
