@@ -254,11 +254,29 @@ tray icon, and the scripts work perfectly well with neither.
 
 ## The second copy
 
-It is **not** a folder copy of your saves. Setup creates a bare git repository
-at `<folder>\steam-save-history.git` and pushes into it, so what lands in the
-folder is a few packed files rather than thousands of loose save files. On a
-29-game library that is about 490 KB in 36 files. You get it back with
-`git clone`, and the files come out byte for byte.
+The folder gets two things, because they answer two different questions:
+
+```
+Your saves (latest)\          your save files, as ordinary folders, one per game
+steam-save-history.git\       the full history, every point ever captured
+READ ME - how to get my saves back.txt
+recover-my-saves.cmd
+```
+
+**`Your saves (latest)`** needs no tools at all. Your PC dies, you sign in to
+Google Drive or OneDrive on a new machine, open that folder and copy your saves
+out. That is the case that matters most and it must not depend on knowing git,
+or on git being installed.
+
+**`steam-save-history.git`** is where the history lives: every game, every
+point in time, byte for byte. It is a repository rather than folders because
+that is what lets it hold the whole history in a few small files instead of
+thousands, and a synced folder handles a handful of packed files far better
+than thousands of loose ones. `recover-my-saves.cmd` unpacks it back into plain
+folders for anyone who needs an older save; that one does need git.
+
+On a 29-game library: about 490 KB of history, plus 6 MB of plain current
+saves.
 
 That matters most for a synced folder. OneDrive syncing a handful of packed
 files is cheap and safe; OneDrive syncing thousands of individual save files

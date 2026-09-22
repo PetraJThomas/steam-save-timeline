@@ -34,6 +34,35 @@ function Write-GamesJson([hashtable]$Names) {
     $Names | ConvertTo-Json | Set-Content (Join-Path $script:CapMirror 'games.json') -Encoding UTF8
 }
 
+function Update-PlainCopy([string]$AppId, [string]$SourceDir) {
+    <#
+    Keep a plain, browsable copy of the CURRENT saves beside the repository.
+
+    The repository holds every point in history and is the thing worth having,
+    but reading it needs git. Someone whose PC died, sitting at a new machine
+    with nothing but their synced folder, should be able to open it and see
+    save files. So the current state is also written out as ordinary files,
+    named by game. History still lives in the repository next to it.
+
+    Only for a folder destination: an online backup is a URL, not something you
+    can browse.
+    #>
+    $origin = Get-GitLine @('remote', 'get-url', 'origin')
+    if (-not $origin -or $origin -notmatch '\.git$') { return }
+    if ($origin -match '^[a-z]+://' -or $origin -match '^[^\\/:]+@') { return }   # remote URL
+    $folder = Split-Path $origin -Parent
+    if (-not $folder -or -not (Test-Path $folder)) { return }
+
+    try {
+        $dest = Join-Path (Join-Path $folder 'Your saves (latest)') (Split-Path (Get-GameBranchRoot $AppId) -Leaf)
+        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+        New-Item -ItemType Directory -Path $dest -Force | Out-Null
+        Copy-Item (Join-Path $SourceDir '*') $dest -Recurse -Force
+    } catch {
+        Write-Capture "[warn] plain copy: $_"
+    }
+}
+
 function Set-FolderLabel([string]$Dir, [string]$Label) {
     <#
     Make Explorer show the game name for a folder that is really called
@@ -216,6 +245,7 @@ function New-Snapshot {
 
     if ((Invoke-Git @('remote', 'get-url', 'origin')) -eq 0) {
         if ((Invoke-Git @('push', 'origin', $Branch)) -ne 0) { Write-Capture '[warn] push failed' }
+        Update-PlainCopy $appId $dest
     }
     return $commit
 }

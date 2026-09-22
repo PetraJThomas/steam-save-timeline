@@ -57,7 +57,14 @@ user-facing doc; this file is the working notes.
   blank box; and never put Latin text in an icon-font TextBlock, because the
   font has no letters and "GAMES" came out as five boxes.
 
-- The "second copy" is a bare repo the mirror pushes to, never a file copy of
+- A folder second copy gets BOTH a bare repo (history) and "Your saves
+  (latest)" as plain files, plus a README and a recovery script. The plain copy
+  exists because the disaster case is someone on a new machine with only their
+  synced folder: recovery must not require git, or knowing git. The repo alone
+  failed that test. `Update-PlainCopy` refreshes one game after its push, and
+  only for a filesystem destination, since an online backup is a URL.
+
+- The "second copy" repo is a bare repo the mirror pushes to, never a file copy of
   the save folder: a synced folder then carries a few packfiles instead of
   thousands of loose saves. Reconciliation is per-push, so anything that
   commits must also push, or that part of the copy freezes. `Save-Metadata`

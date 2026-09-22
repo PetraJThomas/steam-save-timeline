@@ -327,7 +327,99 @@ function Connect-FolderCopy([string]$Folder) {
         if (-not (Test-Path $target)) { throw "couldn't create the copy at $target" }
         Write-Log "[copy] created $target"
     }
+    Write-CopyInstructions $Folder
     return $target
+}
+
+function Write-CopyInstructions([string]$Folder) {
+    <#
+    A backup you cannot see is a backup you do not trust.
+
+    The copy is a bare repository, which is the right shape (full history, no
+    conflict copies of individual saves, a few packed files instead of
+    thousands) but it means opening the folder shows git internals and none of
+    your saves. So the folder explains itself, and ships a script that turns it
+    back into ordinary browsable folders without anyone needing to know git.
+    #>
+    $readme = @"
+YOUR STEAM SAVES ARE IN HERE
+============================
+
+"Your saves (latest)"
+    Your save files, as ordinary folders, one per game. Nothing special is
+    needed to use these: open the folder and copy what you want. This is the
+    most recent capture of each game.
+
+"steam-save-history.git"
+    The full history: every game, and every point in time ever captured, not
+    just the latest. It does not look like save files because it is stored as
+    a repository, which is what lets it hold the whole history in a few small
+    files instead of thousands, and give every file back byte for byte.
+
+So: if you just need your saves, use the first folder. If you need an OLDER
+save (the one from before something went wrong), use the history.
+
+GETTING AN OLDER SAVE BACK
+--------------------------
+Double-click:  recover-my-saves.cmd
+
+It writes a "recovered-saves" folder here with every game's history unpacked.
+Nothing already here is changed or deleted.
+
+That step needs Git for Windows (https://git-scm.com/download/win). If you do
+not have it and do not want it, the "Your saves (latest)" folder still works
+on its own, with no tools at all.
+
+Written by Steam Save Timeline:
+https://github.com/PetraJThomas/steam-save-timeline
+"@
+    Set-Content (Join-Path $Folder 'READ ME - how to get my saves back.txt') $readme -Encoding UTF8
+
+    $ps1 = @'
+# Turns the repository next to this script back into ordinary folders.
+$ErrorActionPreference = 'Stop'
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repo = Join-Path $here 'steam-save-history.git'
+$out  = Join-Path $here 'recovered-saves'
+
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Host 'Git is needed. Install it from https://git-scm.com/download/win' -ForegroundColor Red
+    return
+}
+if (-not (Test-Path $repo)) { Write-Host "No repository found at $repo" -ForegroundColor Red; return }
+
+$work = Join-Path $env:TEMP ("sst-recover-" + [guid]::NewGuid().ToString('N'))
+Write-Host "Reading $repo ..."
+& git clone --quiet $repo $work
+if (-not (Test-Path $work)) { Write-Host 'Could not read the repository.' -ForegroundColor Red; return }
+
+New-Item -ItemType Directory -Path $out -Force | Out-Null
+$branches = @(& git -C $work branch -r --format='%(refname:short)') |
+            Where-Object { $_ -like 'origin/game/*/main' }
+
+foreach ($b in $branches) {
+    $local = $b -replace '^origin/', ''
+    $name  = ($local -split '/')[1]            # <slug>-<appid>
+    & git -C $work checkout --quiet -B recover $b 2>&1 | Out-Null
+    $appId = ($name -split '-')[-1]
+    $src   = Join-Path $work $appId
+    if (Test-Path $src) {
+        $dest = Join-Path $out $name
+        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+        Copy-Item $src $dest -Recurse -Force
+        $n = @(Get-ChildItem $dest -Recurse -File).Count
+        Write-Host ("  {0,-45} {1} file(s)" -f $name, $n)
+    }
+}
+Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+Write-Host ''
+Write-Host "Done. Your saves are in: $out" -ForegroundColor Green
+Write-Host 'Nothing in the backup was changed.'
+'@
+    Set-Content (Join-Path $Folder 'recover-my-saves.ps1') $ps1 -Encoding UTF8
+
+    $cmd = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0recover-my-saves.ps1`"`r`npause`r`n"
+    Set-Content (Join-Path $Folder 'recover-my-saves.cmd') $cmd -Encoding ASCII
 }
 
 function Connect-GitHubRepo {
@@ -380,6 +472,15 @@ function Save-SecondCopy([string]$Url) {
     if ((Invoke-Git @('push', '--all', 'origin')) -ne 0) {
         return "destination saved, but the first copy failed, check $Url"
     }
+
+    # And the plain, no-tools-required copy of the current saves beside it.
+    $plain = 0
+    foreach ($g in (Get-ChildItem $MirrorDir -Directory | Where-Object { $_.Name -match '^\d+$' })) {
+        Update-PlainCopy $g.Name $g.FullName
+        $plain++
+    }
+    if ($plain -gt 0) { Write-Log "[copy] wrote $plain game(s) as plain files too" }
+
     return "every timeline copied to $Url"
 }
 
