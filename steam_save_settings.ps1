@@ -1,4 +1,4 @@
-<#
+﻿<#
 steam_save_settings.ps1: one place for the handful of things worth changing.
 
 `$MirrorDir` was declared separately in the watcher, the setup window and the
@@ -48,6 +48,7 @@ function Get-SteamSaveSettings {
         try { ($defaults | ConvertTo-Json) | Set-Content $path -Encoding UTF8 } catch {}
     }
 
+    $script:RawSettings = $values
     $script:SettingsCache = [pscustomobject]@{
         MirrorDir          = [Environment]::ExpandEnvironmentVariables([string]$values.mirrorDir)
         DebounceSeconds    = [int]$values.debounceSeconds
@@ -56,4 +57,20 @@ function Get-SteamSaveSettings {
         Path               = $path
     }
     return $script:SettingsCache
+}
+
+function Set-SteamSaveSetting {
+    <#
+    Merge values into settings.json and reload. Keys not passed are left alone,
+    so writing one setting never silently resets the others.
+    #>
+    param([hashtable]$Values)
+
+    [void](Get-SteamSaveSettings)          # ensures the file and $script:RawSettings exist
+    $merged = [ordered]@{}
+    foreach ($k in $script:RawSettings.Keys) { $merged[$k] = $script:RawSettings[$k] }
+    foreach ($k in $Values.Keys)             { $merged[$k] = $Values[$k] }
+
+    ($merged | ConvertTo-Json) | Set-Content (Join-Path $PSScriptRoot 'settings.json') -Encoding UTF8
+    return (Get-SteamSaveSettings -Reload)
 }

@@ -218,6 +218,43 @@ function Build-TrayApp {
     return $true
 }
 
+function Move-Mirror([string]$From, [string]$To) {
+    <#
+    Relocate the timeline itself. This is a save history, so it moves in one
+    operation and is checked afterwards: Move-Item handles the cross-volume
+    copy-then-delete, and nothing here removes anything of its own accord. It
+    refuses rather than merges if the destination already holds something.
+    #>
+    if ($From -eq $To) { return }
+    if (-not (Test-Path (Join-Path $From '.git'))) {
+        Write-Log "[move] nothing at $From yet, the timeline will be created at $To"
+        return
+    }
+    if ((Test-Path $To) -and @(Get-ChildItem $To -Force -ErrorAction SilentlyContinue).Count -gt 0) {
+        throw "$To already exists and is not empty"
+    }
+
+    $before = @(& git -C $From branch --list).Count
+    Write-Log "[move] $From -> $To"
+    $parent = Split-Path $To -Parent
+    if ($parent -and -not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    Move-Item -LiteralPath $From -Destination $To -Force
+
+    $after = @(& git -C $To branch --list).Count
+    if (-not (Test-Path (Join-Path $To '.git')) -or $after -ne $before) {
+        throw "the move did not verify: $before timelines before, $after after"
+    }
+    Write-Log "[move] verified, $after timelines intact"
+}
+
+function New-FolderShortcut([string]$Path, [string]$Target, [string]$Desc) {
+    $sh = New-Object -ComObject WScript.Shell
+    $s  = $sh.CreateShortcut($Path)
+    $s.TargetPath  = $Target
+    $s.Description = $Desc
+    $s.Save()
+}
+
 function New-Shortcut([string]$Path, [string]$Target, [string]$Arguments, [string]$WorkDir, [string]$Desc) {
     $sh = New-Object -ComObject WScript.Shell
     $s  = $sh.CreateShortcut($Path)
@@ -363,6 +400,15 @@ $SteamSaveTheme
         <Border Margin="0,8,0,0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}"
                 BorderThickness="1" CornerRadius="6" Padding="14,12">
           <StackPanel>
+            <TextBlock Text="Where the timeline is kept" FontSize="12.5" Foreground="{StaticResource Text}"/>
+            <DockPanel Margin="24,6,0,0">
+              <Button Name="MirrorBrowseBtn" Content="Choose..." Style="{StaticResource Btn}" DockPanel.Dock="Right" Margin="6,0,0,0"/>
+              <TextBox Name="MirrorPath"/>
+            </DockPanel>
+            <TextBlock Name="MirrorNote" Margin="24,6,0,14" FontSize="10.5" TextWrapping="Wrap"
+                       Foreground="{StaticResource Muted}"
+                       Text="Every save ever captured lives here. Changing it moves what is already there."/>
+
             <CheckBox Name="OptLogon" IsChecked="True" Content="Start with Windows (keep capturing automatically)"/>
             <StackPanel Name="MethodPanel" Margin="24,6,0,0">
               <RadioButton Name="MethodExe"  GroupName="startup" Content="Tray app (SteamSaveTimeline.exe) - also gives one-click access to the browser"/>
@@ -370,7 +416,8 @@ $SteamSaveTheme
               <Button Name="BuildExeBtn" Content="Build the tray app" Style="{StaticResource Btn}"
                       HorizontalAlignment="Left" Margin="0,8,0,0" Padding="10,4" FontSize="11" Visibility="Collapsed"/>
             </StackPanel>
-            <CheckBox Name="OptDesktop" IsChecked="True" Content="Put the timeline browser on my desktop" Margin="0,12,0,0"/>
+            <CheckBox Name="OptDesktop" IsChecked="True" Content="Desktop shortcut that opens the Timeline Browser" Margin="0,12,0,0"/>
+            <CheckBox Name="OptFolderLinks" Content="Desktop shortcuts to the save folders themselves" Margin="0,10,0,0"/>
             <!--
               One radio group that includes "no", rather than a checkbox gating
               a disabled panel. The old shape had two traps: clicking a
@@ -439,6 +486,10 @@ $MethodExe     = $window.FindName('MethodExe')
 $MethodTask    = $window.FindName('MethodTask')
 $OptDesktop    = $window.FindName('OptDesktop')
 $CopyNone      = $window.FindName('CopyNone')
+$MirrorPath    = $window.FindName('MirrorPath')
+$MirrorBrowseBtn = $window.FindName('MirrorBrowseBtn')
+$MirrorNote    = $window.FindName('MirrorNote')
+$OptFolderLinks = $window.FindName('OptFolderLinks')
 $RemotePanel   = $window.FindName('RemotePanel')
 $RemoteFolder  = $window.FindName('RemoteFolder')
 $RemoteGitHub  = $window.FindName('RemoteGitHub')
@@ -604,6 +655,16 @@ function Invoke-Setup {
     Set-CaptureLogger { param($m) Write-Log $m }
 
     try {
+        # Relocating has to happen before anything opens the old path.
+        $wanted = $MirrorPath.Text.Trim()
+        if ($wanted -and $wanted -ne $MirrorDir) {
+            Move-Mirror $MirrorDir $wanted
+            [void](Set-SteamSaveSetting @{ mirrorDir = $wanted })
+            $MirrorDir = $wanted
+            Initialize-Capture $MirrorDir
+            Write-Log "[config] timeline now kept at $MirrorDir"
+        }
+
         Initialize-Repo
         # A repo with no identity cannot commit; give the mirror its own rather
         # than editing the user's global git config behind their back.
@@ -683,6 +744,20 @@ function Invoke-Setup {
             }
         }
 
+        if ($OptFolderLinks.IsChecked) {
+            try {
+                $desk = [Environment]::GetFolderPath('Desktop')
+                New-FolderShortcut (Join-Path $desk 'Steam Saves (timeline).lnk') $MirrorDir 'Every save ever captured'
+                Write-Log "[desktop] folder shortcut to $MirrorDir"
+                # Only a folder destination can be opened; an online backup is a URL.
+                if ($RemoteFolder.IsChecked -and $FolderPath.Text.Trim()) {
+                    $second = $FolderPath.Text.Trim()
+                    New-FolderShortcut (Join-Path $desk 'Steam Saves (second copy).lnk') $second 'The off-drive copy'
+                    Write-Log "[desktop] folder shortcut to $second"
+                }
+            } catch { Write-Log "[warn] folder shortcuts: $_" }
+        }
+
         $script:Done = $true
         $GoBtn.Content   = 'Open the timeline browser'
         $GoBtn.IsEnabled = $true
@@ -710,6 +785,28 @@ $BuildExeBtn.Add_Click({
         $MethodExe.Content      = 'Tray app (SteamSaveTimeline.exe), also gives one-click access to the browser'
         $MethodExe.IsChecked    = $true
         $BuildExeBtn.Visibility = 'Collapsed'
+    }
+})
+
+$MirrorBrowseBtn.Add_Click({
+    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dlg.Description         = 'Where should the timeline be kept?'
+    $dlg.ShowNewFolderButton = $true
+    if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+
+    # Picking "D:\Backups" should not scatter 29 numbered folders into it, so
+    # give the timeline its own folder unless one was picked directly.
+    $chosen = $dlg.SelectedPath
+    if ((Split-Path $chosen -Leaf) -ne 'steam-save-history' -and -not (Test-Path (Join-Path $chosen '.git'))) {
+        $chosen = Join-Path $chosen 'steam-save-history'
+    }
+    $MirrorPath.Text = $chosen
+    $MirrorNote.Text = if ($chosen -eq $MirrorDir) {
+        'Every save ever captured lives here. Changing it moves what is already there.'
+    } elseif (Test-Path (Join-Path $MirrorDir '.git')) {
+        "On Set up, the existing timeline is MOVED from $MirrorDir to here. Nothing is copied or left behind."
+    } else {
+        'The timeline will be created here.'
     }
 })
 
@@ -754,5 +851,6 @@ $GoBtn.Add_Click({
 
 # Run the checks after the window has painted, so it does not appear frozen
 # while the Steam library is surveyed.
+$MirrorPath.Text = $MirrorDir
 $window.Add_ContentRendered({ Invoke-Checks })
 [void]$window.ShowDialog()

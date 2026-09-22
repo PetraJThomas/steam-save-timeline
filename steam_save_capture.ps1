@@ -34,6 +34,35 @@ function Write-GamesJson([hashtable]$Names) {
     $Names | ConvertTo-Json | Set-Content (Join-Path $script:CapMirror 'games.json') -Encoding UTF8
 }
 
+function Set-FolderLabel([string]$Dir, [string]$Label) {
+    <#
+    Make Explorer show the game name for a folder that is really called
+    "1683340".
+
+    The folder cannot be renamed: that path is inside every commit's tree, so
+    renaming it would fragment history. But Explorer displays
+    LocalizedResourceName from a desktop.ini instead of the real folder name,
+    which puts the game on screen while the appid stays on disk where git needs
+    it. Cosmetic only, and gitignored so it never reaches a commit.
+
+    desktop.ini is honoured only when it is hidden+system AND the folder itself
+    is read-only or system. Both are set here. Neither breaks wipe-and-recopy,
+    because Remove-Item -Force clears read-only.
+    #>
+    if (-not $Label) { return }
+    try {
+        $ini  = Join-Path $Dir 'desktop.ini'
+        $text = "[.ShellClassInfo]`r`nLocalizedResourceName=$Label`r`nInfoTip=Steam save timeline for $Label`r`n"
+        Set-Content -LiteralPath $ini -Value $text -Encoding Unicode -Force
+        (Get-Item -LiteralPath $ini -Force).Attributes =
+            [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System -bor [IO.FileAttributes]::Archive
+        $folder = Get-Item -LiteralPath $Dir -Force
+        $folder.Attributes = $folder.Attributes -bor [IO.FileAttributes]::ReadOnly
+    } catch {
+        # cosmetic only: never let this stop a snapshot
+    }
+}
+
 function Write-GamesIndex([hashtable]$Names) {
     <#
     The same map, written for a person rather than a parser.
@@ -85,6 +114,12 @@ function Initialize-Repo {
     # .gitattributes, since the config alone does not travel with a clone.
     Invoke-Git @('config', 'core.autocrlf', 'false') | Out-Null
     Invoke-Git @('config', 'core.safecrlf', 'false') | Out-Null
+    # Explorer's folder labels are local decoration, not history.
+    $gi = Join-Path $script:CapMirror '.gitignore'
+    if (-not (Test-Path $gi)) {
+        "# Explorer folder labels, cosmetic and machine-local.`ndesktop.ini`n" |
+            Set-Content $gi -Encoding ASCII -NoNewline
+    }
     $ga = Join-Path $script:CapMirror '.gitattributes'
     if (-not (Test-Path $ga)) {
         "# Save data is byte-exact: never translate line endings.`n* -text`n" |
@@ -169,6 +204,9 @@ function New-Snapshot {
     $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $note  = if ($ext.Copied -gt 0) { " (+$($ext.Copied) external)" } else { '' }
     $verb  = if ($Kind -eq 'snapshot') { 'snapshot' } else { 'sync' }
+
+    # Explorer shows "Kayak VR: Mirage (1683340)"; the folder is still 1683340.
+    Set-FolderLabel $dest "$name ($appId)"
 
     # [appid] prefix kept as a readable anchor; a timeline is one game's branch,
     # so history no longer has to be grepped out of a shared log.
