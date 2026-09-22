@@ -606,6 +606,9 @@ function Invoke-Setup {
 
         $names = Get-GameNames $script:SteamRoot
         Write-GamesJson $names
+        Set-TimelineGameNames $names
+        $renamedRefs = Update-BranchNaming $names
+        if ($renamedRefs -gt 0) { Write-Log "[init] renamed $renamedRefs branch(es) to include game names" }
         $seeded = Initialize-GameTimelines $names
         if ($seeded -gt 0) { Write-Log "[init] created $seeded game timeline(s)" }
 

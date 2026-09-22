@@ -40,6 +40,12 @@ $userdata  = Join-Path $steamRoot 'userdata'
 Initialize-Repo
 $names = Get-GameNames $steamRoot
 Write-GamesJson $names
+Set-TimelineGameNames $names
+
+# Branches carry the game name as well as the appid. Older mirrors used the
+# appid alone; rename them in place (git branch -m keeps every commit).
+$renamedRefs = Update-BranchNaming $names
+if ($renamedRefs -gt 0) { Write-Host "[init] renamed $renamedRefs branch(es) to include game names" }
 
 # Give any game already mirrored under an older layout its own timeline.
 # No-op once every game has one.

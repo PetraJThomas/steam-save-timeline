@@ -96,13 +96,19 @@ shared branch would mean forking one game's history rolled back every other
 game's mirror.
 
 ```
-game/<appid>/main      that game's canonical timeline
-game/<appid>/daily     its daily snapshots
-game/<appid>/<slug>    a save branch, meaning a divergent playthrough
-master                 repo metadata only
+game/<name>-<appid>/main     that game's canonical timeline
+game/<name>-<appid>/daily    its daily snapshots
+game/<name>-<appid>/<slug>   a save branch, meaning a divergent playthrough
+master                       repo metadata only
 ```
 
-A game's history is therefore just `git log game/<appid>/main`. Inside a
+So `git branch` reads as `game/kayak-vr-mirage-1683340/main`, and sorts
+alphabetically by game. The name is there to be read; the **appid is what code
+matches on**, because Valve renames games and a ref cannot hold the colons,
+slashes and trademark signs that game titles use. A game renamed later keeps
+the branch it already has rather than churning.
+
+A game's history is therefore just `git log game/<name>-<appid>/main`. Inside a
 timeline:
 
 ```
@@ -120,7 +126,7 @@ rather than lingering forever.
 - **SYNC** means Steam actually moved data. Event-driven, lands on the game's
   active timeline.
 - **SNAPSHOT** means a sweep found this on disk at that moment. Runs at startup
-  and every 24 hours onto `game/<appid>/daily`.
+  and every 24 hours onto `game/<name>-<appid>/daily`.
 
 Keeping them on separate timelines keeps both meanings honest, and the daily
 sweep is your floor of coverage: at worst you lose a day, even if Steam never
@@ -213,7 +219,7 @@ Timeline commits are built with a throwaway git index (`read-tree`, then
 extended **without ever being checked out** and without disturbing any other
 game or `HEAD`. One consequence is worth knowing: the mirror's working tree is
 a staging area, not a meaningful checkout. `git status` there is noise, so read
-history with `git log game/<appid>/main` instead.
+history with `git log game/<name>-<appid>/main` instead.
 
 ### The optional tray app
 
@@ -280,7 +286,7 @@ MDL2 Assets), so there is nothing to install and no missing-glyph boxes.
   install path comes from `appmanifest_<appid>.acf`, which disappears with the
   game. Reported as missing rather than guessed at.
 - **No GUI for deleting a save branch** yet. Use `git branch -D
-  game/<appid>/<slug>` by hand, and drop the entry from `timelines.json` if it
+  game/<name>-<appid>/<slug>` by hand, and drop the entry from `timelines.json` if it
   was the active one.
 - **Windows only.** The ledger-watching approach ports to Linux and the Steam
   Deck trivially.

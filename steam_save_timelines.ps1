@@ -6,11 +6,15 @@ branches work: git branches are repo-wide, but a save timeline is per-game, so
 a shared branch would mean forking one game's timeline rolled back every other
 game's mirror.
 
-    game/<appid>/main      the canonical timeline for that game
-    game/<appid>/daily     its daily snapshots, a floor of coverage that does
-                           not depend on Steam ever syncing
-    game/<appid>/<slug>    a save branch: a divergent playthrough
-    master                 repo metadata only (games.json, timelines.json)
+    game/<name>-<appid>/main    the canonical timeline for that game
+    game/<name>-<appid>/daily   its daily snapshots, a floor of coverage that
+                                does not depend on Steam ever syncing
+    game/<name>-<appid>/<slug>  a save branch: a divergent playthrough
+    master                      repo metadata (games.json, timelines.json)
+
+e.g. game/kayak-vr-mirage-1683340/main. The name is there to be read; the
+appid is what code matches on, because names change and refs cannot hold the
+characters game titles use.
 
 Exactly one timeline per game is *active*; the watcher appends new syncs to it.
 The daily timeline is an archive and is never active, restoring from it lands
@@ -20,7 +24,7 @@ Commits are built with a throwaway index (read-tree / write-tree / commit-tree /
 update-ref) rather than `git checkout`, so a branch is extended without ever
 being checked out and without disturbing any other game. A consequence: the
 working tree is a staging area, not a meaningful checkout. `git status` in the
-mirror is noise, read history with `git log game/<appid>/main`.
+mirror is noise, read history with `git log game/<name>-<appid>/main`.
 
 Dot-sourced by the watcher and the restore GUI. Call Initialize-Timelines first.
 #>
@@ -62,8 +66,54 @@ function Get-MetaBranch {
     return $script:TLMeta
 }
 
-function Get-MainTimeline ([string]$AppId) { return "game/$AppId/main" }
-function Get-DailyTimeline([string]$AppId) { return "game/$AppId/daily" }
+<#
+Branch roots are `game/<slug>-<appid>`, so `git branch` reads as
+`game/kayak-vr-mirage-1683340/main` instead of a wall of numbers, and sorts
+alphabetically by game.
+
+The appid stays, and stays authoritative. It is the only stable identity: Valve
+renames games, and names carry colons, slashes and trademark signs that a ref
+cannot. So the slug is a label for humans and the appid is what code matches
+on. A game renamed later keeps its existing branch rather than being renamed
+again, because the ref is found by appid, not by name.
+#>
+$script:GameNames  = @{}
+$script:RootCache  = @{}
+
+function Set-TimelineGameNames([hashtable]$Names) {
+    if ($Names) { $script:GameNames = $Names }
+    $script:RootCache = @{}
+}
+
+function Get-GameSlug([string]$AppId) {
+    $name = $null
+    if ($script:GameNames -and $script:GameNames.ContainsKey($AppId)) { $name = [string]$script:GameNames[$AppId] }
+    # unknown, or the "app 1683340" placeholder: do not end up with the id twice
+    if (-not $name -or $name -match '^app\s+\d+$') { return 'app' }
+    $slug = ConvertTo-TimelineSlug $name
+    if (-not $slug -or $slug -eq 'timeline') { $slug = 'app' }
+    return $slug
+}
+
+function Get-GameBranchRoot([string]$AppId) {
+    <# The ref prefix for one game, reusing whatever already exists. #>
+    if ($script:RootCache.ContainsKey($AppId)) { return $script:RootCache[$AppId] }
+
+    foreach ($pattern in @("refs/heads/game/*-$AppId/*", "refs/heads/game/$AppId/*")) {
+        $ref = Get-GitLine @('for-each-ref', '--format=%(refname:short)', '--count=1', $pattern)
+        if ($ref) {
+            $root = $ref.Substring(0, $ref.LastIndexOf('/'))
+            $script:RootCache[$AppId] = $root
+            return $root
+        }
+    }
+    $root = "game/$(Get-GameSlug $AppId)-$AppId"
+    $script:RootCache[$AppId] = $root
+    return $root
+}
+
+function Get-MainTimeline ([string]$AppId) { return ((Get-GameBranchRoot $AppId) + '/main') }
+function Get-DailyTimeline([string]$AppId) { return ((Get-GameBranchRoot $AppId) + '/daily') }
 
 function ConvertTo-TimelineSlug([string]$Name) {
     # git refs forbid spaces, ~ ^ : ? * [ .. and a trailing .lock, so reduce a
@@ -95,7 +145,7 @@ function Get-GameTimelines([string]$AppId) {
     $daily  = Get-DailyTimeline $AppId
     $out    = @()
 
-    foreach ($b in @(Get-GitOutput @('for-each-ref', '--format=%(refname:short)', "refs/heads/game/$AppId/"))) {
+    foreach ($b in @(Get-GitOutput @('for-each-ref', '--format=%(refname:short)', "refs/heads/$(Get-GameBranchRoot $AppId)/"))) {
         $b = ([string]$b).Trim()
         if (-not $b) { continue }
         $kind = 'fork'
@@ -242,7 +292,7 @@ function New-TimelineFork {
     if ($slug -in @('main', 'daily')) {
         return @{ Ok = $false; Message = "'$slug' is reserved, pick another name." }
     }
-    $ref = "game/$AppId/$slug"
+    $ref = (Get-GameBranchRoot $AppId) + "/$slug"
     if (Test-Timeline $ref) {
         return @{ Ok = $false; Message = "This game already has a timeline called '$slug'." }
     }
@@ -283,11 +333,54 @@ function Get-LastSnapshotTime([string]$AppId, [string]$Branch) {
     return $null
 }
 
+function Update-BranchNaming([hashtable]$Names) {
+    <#
+    Rename legacy `game/<appid>/*` refs to `game/<slug>-<appid>/*`. Idempotent:
+    a root that is not bare digits is already named and is left alone, and a
+    game renamed on Steam later keeps the ref it has rather than churning.
+
+    `git branch -m` moves the ref and keeps every commit, so no history is
+    touched. timelines.json is repointed in the same pass, since it stores
+    branch names.
+    #>
+    Set-TimelineGameNames $Names
+    $map        = Get-TimelineMap
+    $mapChanged = $false
+    $renamed    = 0
+
+    foreach ($ref in @(Get-GitOutput @('for-each-ref', '--format=%(refname:short)', 'refs/heads/game/'))) {
+        $ref = ([string]$ref).Trim()
+        if (-not $ref) { continue }
+        $parts = $ref -split '/'
+        if ($parts.Count -ne 3 -or $parts[1] -notmatch '^\d+$') { continue }   # already named
+
+        $appId = $parts[1]
+        $new   = "game/$(Get-GameSlug $appId)-$appId/$($parts[2])"
+        if ($new -eq $ref) { continue }
+        if ((Invoke-Git @('branch', '-m', $ref, $new)) -ne 0) { continue }
+
+        $renamed++
+        foreach ($k in @($map.Keys)) {
+            if ($map[$k] -eq $ref) { $map[$k] = $new; $mapChanged = $true }
+        }
+    }
+
+    if ($renamed -gt 0) {
+        $script:RootCache = @{}
+        if ($mapChanged) {
+            ($map | ConvertTo-Json) | Set-Content (Join-Path $script:TLMirror 'timelines.json') -Encoding UTF8
+        }
+        Save-Metadata | Out-Null
+    }
+    return $renamed
+}
+
 function Initialize-GameTimelines([hashtable]$Names) {
     <#
     One-off: give every game already in the mirror its own main timeline. Safe
     to re-run, it only creates branches that do not exist yet.
     #>
+    Set-TimelineGameNames $Names
     $made = 0
     foreach ($d in (Get-ChildItem $script:TLMirror -Directory | Where-Object { $_.Name -match '^\d+$' })) {
         $appId = $d.Name

@@ -86,10 +86,18 @@ user-facing doc; this file is the working notes.
   so a shared branch would mean forking one game's timeline rolled back every
   other game's mirror.
 
-      game/<appid>/main     that game's canonical timeline
-      game/<appid>/daily    its daily snapshots (an archive, never active)
-      game/<appid>/<slug>   a save branch, a divergent playthrough
-      master                repo metadata only (games.json, timelines.json)
+      game/<name>-<appid>/main    canonical timeline, e.g.
+                                  game/kayak-vr-mirage-1683340/main
+      game/<name>-<appid>/daily   daily snapshots (an archive, never active)
+      game/<name>-<appid>/<slug>  a save branch, a divergent playthrough
+      master                      repo metadata (games.json, timelines.json)
+
+  The name is a label; the **appid is the identity**. Never match on the slug:
+  names change, and `Get-GameBranchRoot` finds a game's refs by appid
+  (`game/*-<appid>/*`, plus the legacy `game/<appid>/*`) so a rename on Steam
+  does not orphan anything. `Update-BranchNaming` migrates old mirrors with
+  `git branch -m`, which moves refs and keeps every commit; it runs on watcher
+  and setup start and is idempotent.
 
   Exactly one timeline per game is *active* (`timelines.json`, appid -> branch,
   absent = main); the watcher appends syncs to it. Commits are built with a
@@ -122,7 +130,7 @@ user-facing doc; this file is the working notes.
   Then commits to that game's *active* timeline, and pushes that branch if
   an `origin` remote exists.
 
-  Separately it **sweeps** every game onto `game/<appid>/daily` at startup
+  Separately it **sweeps** every game onto `game/<name>-<appid>/daily` at startup
   and every `$DailySnapshotHours` (24). The split is the point: a commit on
   a sync timeline means Steam actually moved data; a commit on a daily
   timeline means "this is what was on disk at time T". Mixing them dilutes
@@ -142,7 +150,7 @@ user-facing doc; this file is the working notes.
   SYNC (blue, Steam moved data), SNAPSHOT (slate, a sweep), RESTORE
   (amber), CANONICAL (green), CREATED (grey), plus a DIVERGED HERE chip.
   Game list from games.json; a timeline picker per game, and
-  one branch per game means history is just `git log game/<appid>/main`.
+  one branch per game means history is just `git log game/<name>-<appid>/main`.
   Beyond Restore it offers **Branch / Diverge Save** (new save branch at the
   selected point, becomes active), **Play this one** (make another timeline
   active and load its latest save), and **Make canonical** (commit a save
@@ -169,7 +177,7 @@ user-facing doc; this file is the working notes.
 - One game per branch, no exceptions, including the daily timelines.
 - The mirror's working tree is a staging area, not a meaningful checkout:
   commits are built through a throwaway index, so `git status` there is
-  noise. Read history with `git log game/<appid>/main`, not `git status`.
+  noise. Read history with `git log game/<name>-<appid>/main`, not `git status`.
 - Watcher observes only, it never writes into Steam's folders. Only the
   GUI's explicit restore touches Steam, and only after the Steam-running
   gate.
@@ -189,7 +197,7 @@ user-facing doc; this file is the working notes.
 1. Commit the owner's recovered save (pulled from an old PC image) as the
    known-good first entry for that game.
 2. No way to delete a save branch from the GUI yet, `git branch -D
-   game/<appid>/<slug>` by hand, and drop the entry from `timelines.json`
+   game/<name>-<appid>/<slug>` by hand, and drop the entry from `timelines.json`
    if it was active.
 3. Optional: scheduled daily Steam restart (`steam.exe -shutdown`, wait,
    relaunch with `-silent`) to force a sync checkpoint, capping the loss

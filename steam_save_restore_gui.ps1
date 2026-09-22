@@ -231,7 +231,7 @@ $SteamSaveTheme
             $ok.IsEnabled = $false
             return
         }
-        if (Test-Timeline "game/$AppId/$slug") {
+        if (Test-Timeline ((Get-GameBranchRoot $AppId) + "/$slug")) {
             $hint.Foreground = $bad
             $hint.Text = "$GameName already has a branch called '$slug'."
             $ok.IsEnabled = $false
@@ -564,6 +564,7 @@ if (Test-Path $gamesPath) {
     (Get-Content $gamesPath -Raw -Encoding UTF8 | ConvertFrom-Json).PSObject.Properties |
         ForEach-Object { $games[$_.Name] = $_.Value }
 }
+Set-TimelineGameNames $games
 $appIds = @(Get-ChildItem $MirrorDir -Directory | Where-Object Name -match '^\d+$' | Select-Object -ExpandProperty Name)
 $script:loading         = $false
 $script:CurrentTimeline = $null

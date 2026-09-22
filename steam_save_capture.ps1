@@ -154,6 +154,7 @@ function Invoke-Sweep {
     #>
     param([hashtable]$Names, [string]$SteamRoot, [scriptblock]$OnEachGame)
 
+    Set-TimelineGameNames $Names
     $caches = @(Get-RemoteCachePaths $SteamRoot)
     $n = 0
     foreach ($cache in $caches) {
