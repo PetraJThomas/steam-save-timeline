@@ -23,8 +23,31 @@ Luck shouldn't be load-bearing. Sync is not backup. This makes the backup.
 
 ## Quick start
 
+1. Download the latest release zip from the
+   [releases page](https://github.com/PetraJThomas/steam-save-timeline/releases/latest).
+2. Extract it anywhere you like.
+3. Run **`SteamSaveTimeline.exe`**.
+4. Right-click its tray icon and choose **Setup**.
+
 Requires Windows and `git`. If you don't have git, setup offers to install it
 for you. Everything else ships with Windows.
+
+### Windows will warn you, and here is why
+
+The first run shows **"Windows protected your PC"** from an unknown publisher.
+Expect it. It appears because the exe is not code signed, which is a
+certificate that costs money every year, not a judgement about this file. Click
+**More info**, then **Run anyway**. Some antivirus tools flag it too, because
+it is an AutoHotkey script compiled into an exe and that looks much like a
+packer from the outside.
+
+You do not have to take that on trust. `SteamSaveTimeline.ahk` ships in the
+same folder and is the entire source of that exe, about 140 readable lines. If you would rather build it yourself, install
+[AutoHotkey v2](https://www.autohotkey.com/) and the rebuild command is in the
+comment at the top of that file. The exe is a convenience, not the product.
+
+You can also ignore the exe completely and run setup directly. It opens the
+same window the tray icon does:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File steam_save_setup.ps1
@@ -219,8 +242,10 @@ after all.
 | `steam_save_restore_gui.ps1` | The Steam Save Timeline Browser: history, save branches, restore. |
 | `steam_save_theme.ps1` | One dark theme, shared by both windows. |
 | `steam_save_settings.ps1` | Loads `settings.json`: mirror path, debounce, daily interval, task name. |
-| SteamSaveTimeline.ahk | Optional tray app and boot hook. |
-| un-hidden.vbs | Launches a script with no console window at all. Used by the shortcuts and the log-on task. |
+| `steam_save_dialogs.ps1` | The confirm dialog every prompt goes through, so nothing uses a raw message box. |
+| `SteamSaveTimeline.ahk` | Source of the tray app. Compiled to `SteamSaveTimeline.exe`, which is the thing you run. |
+| `RestoreMySaves.ahk` | Source of `Restore my saves.exe`, the "my PC died" button. It only opens setup, deliberately nowhere near the capture daemon. |
+| `run-hidden.vbs` | Launches a script with no console window at all. Used by the shortcuts and the log-on task. |
 
 Timeline commits are built with a throwaway git index (`read-tree`, then
 `add -A -- <appid>`, `write-tree`, `commit-tree`, `update-ref`), so a branch is
