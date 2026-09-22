@@ -96,6 +96,15 @@ user-facing doc; this file is the working notes.
   Steam rename would otherwise write a commit into that game's save timeline
   whose only change is a cosmetic file. Do not "fix" the gitignore.
 
+- `RestoreMySaves.ahk` / `Restore my saves.exe`, the recovery entry point.
+  Extract the release into a backup folder, double-click it, and it opens
+  setup, which finds the adjacent `steam-save-history.git` and restores.
+  **Deliberately a separate program that only launches setup.** Restore logic
+  does not belong in the watcher: that is the one component that must never
+  break, and an auto-clone on daemon startup is exactly the wrong place to
+  take risk. `Find-AdjacentBackup` and `Restore-FromBackup` live in capture so
+  setup can use them; nothing calls them automatically.
+
 - `run-hidden.vbs`, a three-line WScript shim. Everything launched from a
   shortcut or the log-on task goes through it, because
   `powershell -WindowStyle Hidden` still creates and paints a console for a

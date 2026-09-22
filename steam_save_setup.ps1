@@ -93,6 +93,8 @@ function Test-ExistingInstall {
     }
 }
 
+
+
 function Test-OneDriveFolder([string]$Path) {
     foreach ($v in @($env:OneDrive, $env:OneDriveConsumer, $env:OneDriveCommercial)) {
         if ($v -and $Path -and $Path.TrimEnd('\').StartsWith($v.TrimEnd('\'), 'OrdinalIgnoreCase')) { return $true }
@@ -359,9 +361,25 @@ YOUR STEAM SAVES ARE IN HERE
 So: if you just need your saves, use the first folder. If you need an OLDER
 save (the one from before something went wrong), use the history.
 
-GETTING AN OLDER SAVE BACK
---------------------------
-Double-click:  recover-my-saves.cmd
+NEW PC? PUT EVERYTHING BACK
+---------------------------
+1. Download the Steam Save Timeline release zip.
+2. Extract it INTO THIS FOLDER, next to the files already here.
+3. Double-click  "Restore my saves.exe"
+
+It finds this backup sitting beside it, tells you what it found, and restores
+every game with its whole history. Nothing needs moving out of OneDrive or
+Google Drive first, and there are no paths to type.
+
+Capturing resumes from there, and keeps copying back to this same folder.
+
+(Already running it? Right-click the tray icon and choose Setup instead. Same
+window, same result.)
+
+GETTING ONE OLDER SAVE BACK
+---------------------------
+If you only want a single earlier save and do not want to install anything,
+double-click:  recover-my-saves.cmd
 
 It writes a "recovered-saves" folder here with every game's history unpacked.
 Nothing already here is changed or deleted.
@@ -727,6 +745,22 @@ function Invoke-Checks {
         }
     }
 
+    # A backup beside us with no timeline here yet means a fresh machine being
+    # put back together. That is the headline, so it goes in before the rest.
+    # Tested on timelines, not on the folder: the tray app may already have
+    # created an empty mirror before anyone opened this window, and a backup
+    # beside us still deserves to be offered.
+    $script:Backup = $null
+    $hasTimelines = (Test-Path (Join-Path $MirrorDir '.git')) -and
+                    (@(Get-GitOutput @('branch', '--list', 'game/*/main')).Count -gt 0)
+    if (-not $hasTimelines) {
+        $script:Backup = Find-AdjacentBackup $PSScriptRoot
+        if ($script:Backup) {
+            Add-Check 'ok' 'Backup found beside this' `
+                "$($script:Backup.Games) games, last updated $($script:Backup.Updated). Set up will restore it."
+        }
+    }
+
     $ex = Test-ExistingInstall
     if ($ex.Repo) {
         Add-Check 'ok' 'Already set up' "$($ex.Games) game timelines at $MirrorDir"
@@ -786,6 +820,13 @@ function Invoke-Setup {
             $MirrorDir = $wanted
             Initialize-Capture $MirrorDir
             Write-Log "[config] timeline now kept at $MirrorDir"
+        }
+
+        # Restore before anything else: Initialize-Repo would otherwise create
+        # an empty timeline and the backup beside us would never be picked up.
+        if ($script:Backup) {
+            Restore-FromBackup $script:Backup.Path $MirrorDir | Out-Null
+            Write-Log "[restore] new saves will keep going back to $($script:Backup.Path)"
         }
 
         Initialize-Repo

@@ -291,6 +291,25 @@ falls behind silently.
 machines writing to one synced copy is what produces conflicted refs, and that
 is the way to corrupt it. Give each machine its own destination.
 
+## Getting everything back on a new PC
+
+1. Sign in to OneDrive or Google Drive so the backup folder syncs down.
+2. Extract the release zip **into that folder**, beside what is already there.
+3. Double-click **Restore my saves.exe**.
+
+Setup opens, reports the backup it found next to it ("29 games, last updated
+..."), and restores every game with its whole history. Capture resumes, and
+keeps copying back to that same folder. Nothing needs moving out of the synced
+folder first and there are no paths to type.
+
+If the tray app is already running, right-click its icon and choose Setup
+instead: same window, same result.
+
+`Restore my saves.exe` is a separate program on purpose. It only opens setup.
+The capture daemon is the one part that must never break, so restore logic
+goes nowhere near it, and setup is where a person can see what is about to
+happen before agreeing to it.
+
 ## Accessibility
 
 The interface is audited against **WCAG 2.2 AA**, not by eye. `contrast-check.ps1`

@@ -131,6 +131,79 @@ function Write-GamesIndex([hashtable]$Names) {
     ($md -join "`r`n") | Set-Content (Join-Path $script:CapMirror 'GAMES.md') -Encoding UTF8
 }
 
+function Find-AdjacentBackup {
+    <#
+    A backup sitting next to these files.
+
+    The recovery story is: new PC, sign in to OneDrive or Google Drive, find
+    the folder, drop the release zip into it and run setup. No instructions
+    about copying things out of the synced folder first, no git knowledge, no
+    paths to type. If a bare repository is beside us, that is a backup, and we
+    offer to pick it up.
+
+    The scripts can happily live in the synced folder. What must NOT is the
+    working mirror: a live git working tree inside a syncing folder is how you
+    get conflict copies of git internals. So a restore clones the backup to the
+    local mirror path and points the second copy back at the folder it came
+    from, which is the normal arrangement anyway.
+    #>
+    param([string]$Root = $PSScriptRoot)
+
+    if (-not $Root) { return $null }
+    foreach ($candidate in @(
+            (Join-Path $Root 'steam-save-history.git'),
+            (Join-Path (Split-Path $Root -Parent) 'steam-save-history.git'))) {
+        if (-not (Test-Path (Join-Path $candidate 'objects'))) { continue }
+        $games = @(& git --git-dir=$candidate branch --list 'game/*/main' 2>$null).Count
+        if ($games -eq 0) { continue }
+        $when = (& git --git-dir=$candidate for-each-ref --sort=-committerdate --count=1 --format='%(committerdate:short)' refs/heads 2>$null | Select-Object -First 1)
+        return @{ Path = $candidate; Games = $games; Updated = $when }
+    }
+    return $null
+}
+
+function Restore-FromBackup([string]$BackupRepo, [string]$Destination) {
+    <#
+    Clone a found backup into the working mirror, then keep pushing back to it.
+    A plain clone only creates a local branch for HEAD, so every game timeline
+    is recreated from its remote-tracking ref or the mirror would look empty.
+    #>
+    # git writes ordinary chatter to stderr ("No such remote: origin" when there
+    # is nothing to remove), and under EAP Stop that becomes a terminating
+    # error. Judge git by its exit code here, same as Invoke-Git does.
+    $ErrorActionPreference = 'Continue'
+
+    Write-Capture "[restore] reading $BackupRepo"
+    if (Test-Path (Join-Path $Destination '.git')) {
+        # An empty timeline is already here, which happens when the watcher
+        # started before anyone opened setup. Wire it up and fetch rather than
+        # refusing, so the backup is still picked up.
+        if (@(& git -C $Destination branch --list 'game/*/main').Count -gt 0) {
+            throw "$Destination already holds timelines"
+        }
+        & git -C $Destination remote remove origin 2>&1 | Out-Null
+        & git -C $Destination remote add origin $BackupRepo 2>&1 | Out-Null
+        & git -C $Destination fetch --quiet origin 2>&1 | Out-Null
+    } else {
+        & git clone --quiet -- $BackupRepo $Destination 2>&1 | Out-Null
+    }
+    if (-not (Test-Path (Join-Path $Destination '.git'))) { throw 'could not read that backup' }
+
+    $made = 0
+    foreach ($ref in @(& git -C $Destination for-each-ref --format='%(refname:short)' refs/remotes/origin)) {
+        $ref = ([string]$ref).Trim()
+        if (-not $ref -or $ref -eq 'origin/HEAD') { continue }
+        $local = $ref -replace '^origin/', ''
+        & git -C $Destination show-ref --verify --quiet "refs/heads/$local" 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { continue }     # HEAD's branch already exists
+        & git -C $Destination branch --quiet $local $ref 2>&1 | Out-Null
+        $made++
+    }
+    $total = @(& git -C $Destination branch --list).Count
+    Write-Capture "[restore] $total timeline(s) recovered, $made recreated from the backup"
+    return $total
+}
+
 function Initialize-Repo {
     New-Item -ItemType Directory -Path $script:CapMirror -Force | Out-Null
     if (-not (Test-Path (Join-Path $script:CapMirror '.git'))) {
