@@ -185,9 +185,17 @@ function Restore-FromBackup([string]$BackupRepo, [string]$Destination) {
         & git -C $Destination remote add origin $BackupRepo 2>&1 | Out-Null
         & git -C $Destination fetch --quiet origin 2>&1 | Out-Null
     } else {
-        & git clone --quiet -- $BackupRepo $Destination 2>&1 | Out-Null
+        & git -c core.longpaths=true clone --quiet -- $BackupRepo $Destination 2>&1 | Out-Null
     }
     if (-not (Test-Path (Join-Path $Destination '.git'))) { throw 'could not read that backup' }
+
+    # These settle the repo before anything is checked out. Initialize-Repo only
+    # runs on the first capture, and a restore is the one time someone checks out
+    # a timeline before ever capturing: without them git inherits a global
+    # core.autocrlf and has no long-path support, and deep saves fail to restore.
+    foreach ($kv in @(@('core.longpaths', 'true'), @('core.autocrlf', 'false'), @('core.safecrlf', 'false'))) {
+        & git -C $Destination config $kv[0] $kv[1] 2>&1 | Out-Null
+    }
 
     $made = 0
     foreach ($ref in @(& git -C $Destination for-each-ref --format='%(refname:short)' refs/remotes/origin)) {
@@ -216,6 +224,11 @@ function Initialize-Repo {
     # .gitattributes, since the config alone does not travel with a clone.
     Invoke-Git @('config', 'core.autocrlf', 'false') | Out-Null
     Invoke-Git @('config', 'core.safecrlf', 'false') | Out-Null
+    # Steam saves nest deep (Documents\<publisher>\<game>\SaveData\<id>\...),
+    # and that sits under whatever path the mirror lives at. Past 260 characters
+    # git refuses with "Filename too long" and the restore stops half done, so
+    # ask git to use the long-path APIs rather than hoping nobody nests deeply.
+    Invoke-Git @('config', 'core.longpaths', 'true') | Out-Null
     # Explorer's folder labels are local decoration, not history.
     $gi = Join-Path $script:CapMirror '.gitignore'
     if (-not (Test-Path $gi)) {
