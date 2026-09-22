@@ -237,6 +237,27 @@ tray icon, and the scripts work perfectly well with neither.
 
 ---
 
+## The second copy
+
+It is **not** a folder copy of your saves. Setup creates a bare git repository
+at `<folder>\steam-save-history.git` and pushes into it, so what lands in the
+folder is a few packed files rather than thousands of loose save files. On a
+29-game library that is about 490 KB in 36 files. You get it back with
+`git clone`, and the files come out byte for byte.
+
+That matters most for a synced folder. OneDrive syncing a handful of packed
+files is cheap and safe; OneDrive syncing thousands of individual save files
+would be slow and would invent conflict copies of them.
+
+Reconciliation is continuous: every snapshot pushes the branch it just wrote,
+and repo metadata is pushed whenever it changes. Setup shows whether the second
+copy is actually current, because an unplugged drive or a paused sync otherwise
+falls behind silently.
+
+**One thing to avoid:** do not point a second PC at the same synced folder. Two
+machines writing to one synced copy is what produces conflicted refs, and that
+is the way to corrupt it. Give each machine its own destination.
+
 ## Accessibility
 
 The interface is audited against **WCAG 2.2 AA**, not by eye. `contrast-check.ps1`

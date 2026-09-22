@@ -94,6 +94,40 @@ function Test-ExistingInstall {
     }
 }
 
+function Test-OneDriveFolder([string]$Path) {
+    foreach ($v in @($env:OneDrive, $env:OneDriveConsumer, $env:OneDriveCommercial)) {
+        if ($v -and $Path -and $Path.TrimEnd('\').StartsWith($v.TrimEnd('\'), 'OrdinalIgnoreCase')) { return $true }
+    }
+    return $false
+}
+
+function Get-SecondCopyStatus {
+    <#
+    Whether the second copy is actually current. Snapshots push as they happen,
+    so an unplugged drive or a paused sync means it quietly stops keeping up.
+    That belongs on screen, not in a console nobody reads.
+    #>
+    $url = Get-GitLine @('remote', 'get-url', 'origin')
+    if (-not $url) { return $null }
+
+    $heads = @(Get-GitOutput @('ls-remote', '--heads', 'origin'))
+    if ($LASTEXITCODE -ne 0) { return @{ Url = $url; Reachable = $false } }
+
+    $remote = @{}
+    foreach ($l in $heads) {
+        $hash, $ref = ([string]$l) -split '\s+', 2
+        if ($ref) { $remote[$ref.Trim()] = $hash }
+    }
+    $behind = 0; $total = 0
+    foreach ($l in (Get-GitOutput @('for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads/'))) {
+        $hash, $ref = ([string]$l) -split '\s+', 2
+        if (-not $ref) { continue }
+        $total++
+        if ($remote[$ref.Trim()] -ne $hash) { $behind++ }
+    }
+    return @{ Url = $url; Reachable = $true; Total = $total; Behind = $behind }
+}
+
 # ---------------- actions ----------------
 
 function Test-Winget {
@@ -346,6 +380,9 @@ $SteamSaveTheme
                 <Button Name="BrowseBtn" Content="Choose..." Style="{StaticResource Btn}" DockPanel.Dock="Right" Margin="6,0,0,0"/>
                 <TextBox Name="FolderPath"/>
               </DockPanel>
+              <TextBlock Name="FolderNote" Margin="20,6,0,0" FontSize="10.5" TextWrapping="Wrap"
+                         Foreground="{StaticResource Muted}"
+                         Text="A repository is created in that folder, not a loose copy of your saves. It keeps the whole history and every file byte for byte."/>
               <RadioButton Name="RemoteGitHub" GroupName="remote" Margin="0,10,0,0"
                            Content="Free online backup - set up for you, start to finish. Nothing to know beforehand."/>
               <TextBlock Margin="20,2,0,0" FontSize="10.5" TextWrapping="Wrap" Foreground="{StaticResource Muted}"
@@ -399,6 +436,7 @@ $RemoteGitHub  = $window.FindName('RemoteGitHub')
 $RemoteUrlOpt  = $window.FindName('RemoteUrlOpt')
 $FolderPath    = $window.FindName('FolderPath')
 $BrowseBtn     = $window.FindName('BrowseBtn')
+$FolderNote    = $window.FindName('FolderNote')
 $RemoteUrl     = $window.FindName('RemoteUrl')
 $BuildExeBtn   = $window.FindName('BuildExeBtn')
 $ProgressPanel = $window.FindName('ProgressPanel')
@@ -511,6 +549,17 @@ function Invoke-Checks {
         Add-Check 'ok' 'Already set up' "$($ex.Games) game timelines at $MirrorDir"
         $GoBtn.Content = 'Update setup'
     }
+    $copy = Get-SecondCopyStatus
+    if ($copy) {
+        if (-not $copy.Reachable) {
+            Add-Check 'warn' 'Second copy' "unreachable right now: $($copy.Url)"
+        } elseif ($copy.Behind -eq 0) {
+            Add-Check 'ok' 'Second copy' "up to date, $($copy.Total) timelines at $($copy.Url)"
+        } else {
+            Add-Check 'warn' 'Second copy' "$($copy.Behind) of $($copy.Total) timelines not copied yet, at $($copy.Url)"
+        }
+    }
+
     if ($ex.Task -or $ex.Startup) {
         $how = if ($ex.Startup) { 'startup shortcut' } else { 'scheduled task' }
         Add-Check 'ok' 'Starts with Windows' $how
@@ -633,6 +682,14 @@ $BrowseBtn.Add_Click({
     if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         $FolderPath.Text = $dlg.SelectedPath
         $RemoteFolder.IsChecked = $true
+        # A synced folder is a fine destination, but it is worth saying what
+        # actually lands there, and that two PCs writing to one synced copy is
+        # the way to break it.
+        if (Test-OneDriveFolder $dlg.SelectedPath) {
+            $FolderNote.Text = 'OneDrive will sync this as a repository (a few packed files), not as loose save files, so it stays small and keeps full history. Do not point a second PC at this same folder: two machines writing to one synced copy is what corrupts it.'
+        } else {
+            $FolderNote.Text = "A repository is created at $($dlg.SelectedPath)\steam-save-history.git, not a loose copy of your saves. It keeps the whole history and every file byte for byte."
+        }
     }
 })
 $OptLogon.Add_Checked({    $MethodPanel.IsEnabled = $true })

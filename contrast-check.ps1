@@ -177,6 +177,42 @@ $Checks = @(
     @{ W='setup';   T='Primary button label';         Fg=$C.OnAccent; Bg=$C.Accent; S=12;  B=$true }
 )
 
+# ---------------- lint: text that never gets a colour ----------------
+<#
+The inventory above says what colour each piece of copy is SUPPOSED to be. It
+cannot see a TextBlock that never receives that colour at all, and one slipped
+through exactly that way: the destination list in the restore dialog inherited
+the Windows default black on a near-black panel, about 1.1:1, while the
+inventory happily reported 14.69:1.
+
+The cause is that an implicit `<Style TargetType="TextBlock">` does not reach
+inside a DataTemplate. Rows in the browser survived only because ListBoxItem
+sets Foreground and that inherits down; an ItemsControl has no such chain.
+
+So: inside a DataTemplate, Foreground is mandatory. This catches any that lack
+it, reading whole elements rather than single lines.
+#>
+function Test-TemplateForegrounds([string]$Path) {
+    $text = [IO.File]::ReadAllText($Path)
+    $bad  = @()
+    foreach ($tpl in [regex]::Matches($text, '(?s)<DataTemplate>(.*?)</DataTemplate>')) {
+        foreach ($tb in [regex]::Matches($tpl.Groups[1].Value, '(?s)<TextBlock\b.*?/>')) {
+            $el = $tb.Value
+            if ($el -notmatch 'Foreground\s*=' -and $el -notmatch 'Style\s*=') {
+                $bad += (($el -replace '\s+', ' ').Trim())
+            }
+        }
+    }
+    return $bad
+}
+
+$lintFail = @()
+foreach ($f in (Get-ChildItem $PSScriptRoot -Filter '*.ps1')) {
+    foreach ($b in (Test-TemplateForegrounds $f.FullName)) {
+        $lintFail += "$($f.Name): $b"
+    }
+}
+
 # ---------------- run ----------------
 
 $fail = @(); $pass = 0
@@ -194,10 +230,16 @@ foreach ($c in $Checks) {
 }
 
 ''
-if ($fail.Count -eq 0) {
-    Write-Host "WCAG 2.2 AA: all $pass checks pass." -ForegroundColor Green
+if ($lintFail.Count -gt 0) {
+    Write-Host "Text with no colour of its own (inside a DataTemplate, so the" -ForegroundColor Red
+    Write-Host "implicit style will not reach it and it renders default black):" -ForegroundColor Red
+    foreach ($l in $lintFail) { Write-Host "  $l" -ForegroundColor Red }
+    ''
+}
+if ($fail.Count -eq 0 -and $lintFail.Count -eq 0) {
+    Write-Host "WCAG 2.2 AA: all $pass checks pass, and every templated TextBlock sets its own colour." -ForegroundColor Green
 } else {
-    Write-Host "WCAG 2.2 AA: $($fail.Count) of $($Checks.Count) FAIL" -ForegroundColor Red
+    Write-Host "WCAG 2.2 AA: $($fail.Count) of $($Checks.Count) contrast FAIL, $($lintFail.Count) uncoloured" -ForegroundColor Red
     foreach ($f in $fail) {
         Write-Host ("  {0}/{1}: {2:N2}:1, needs {3:N1}:1  ({4} on {5})" -f $f.Where, $f.What, $f.Ratio, $f.Need, $f.Fg, $f.Bg) -ForegroundColor Red
     }

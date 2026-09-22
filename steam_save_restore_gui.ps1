@@ -418,7 +418,7 @@ $SteamSaveTheme
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <StackPanel>
-                  <TextBlock Text="{Binding Name}" FontSize="12.5" TextTrimming="CharacterEllipsis"/>
+                  <TextBlock Text="{Binding Name}" FontSize="12.5" TextTrimming="CharacterEllipsis" Foreground="{StaticResource Text}"/>
                   <TextBlock Text="{Binding AppId}" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,1,0,0"/>
                 </StackPanel>
               </DataTemplate>
@@ -470,7 +470,7 @@ $SteamSaveTheme
                     </Border>
                     <TextBlock Grid.Column="2" Text="{Binding When}" Margin="12,0,0,0" VerticalAlignment="Center"
                                FontFamily="Consolas" FontSize="12" Foreground="{StaticResource Muted}"/>
-                    <TextBlock Grid.Column="3" Text="{Binding Detail}" Margin="14,0,8,0" VerticalAlignment="Center"
+                    <TextBlock Grid.Column="3" Text="{Binding Detail}" Margin="14,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource Text}"
                                FontSize="12" TextTrimming="CharacterEllipsis"/>
                     <Border Grid.Column="4" Visibility="{Binding ForkVis}" CornerRadius="3" Padding="7,2"
                             Background="#2B2039" BorderBrush="{StaticResource ForkC}" BorderThickness="1">
@@ -493,7 +493,7 @@ $SteamSaveTheme
                               <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" Margin="0,0,10,0">
-                              <TextBlock Text="{Binding Name}" FontSize="11.5"/>
+                              <TextBlock Text="{Binding Name}" FontSize="11.5" Foreground="{StaticResource Text}"/>
                               <TextBlock Text="{Binding Where}" FontSize="10" FontFamily="Consolas"
                                          Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis"/>
                             </StackPanel>

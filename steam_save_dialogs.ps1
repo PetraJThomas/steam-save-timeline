@@ -68,7 +68,7 @@ $SteamSaveTheme
             <ItemsControl.ItemTemplate>
               <DataTemplate>
                 <StackPanel Margin="0,0,0,9">
-                  <TextBlock Text="{Binding Head}" FontSize="12" FontWeight="SemiBold"/>
+                  <TextBlock Text="{Binding Head}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
                   <TextBlock Text="{Binding Sub}" FontSize="11.5" Margin="0,2,0,0"
                              FontFamily="Consolas" TextWrapping="Wrap"
                              Foreground="{StaticResource Muted}"/>

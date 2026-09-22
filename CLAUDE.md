@@ -57,6 +57,13 @@ user-facing doc; this file is the working notes.
   blank box; and never put Latin text in an icon-font TextBlock, because the
   font has no letters and "GAMES" came out as five boxes.
 
+- The "second copy" is a bare repo the mirror pushes to, never a file copy of
+  the save folder: a synced folder then carries a few packfiles instead of
+  thousands of loose saves. Reconciliation is per-push, so anything that
+  commits must also push, or that part of the copy freezes. `Save-Metadata`
+  pushes for exactly that reason: without it the second copy kept every save
+  but froze games.json and timelines.json at day one.
+
 - `run-hidden.vbs`, a three-line WScript shim. Everything launched from a
   shortcut or the log-on task goes through it, because
   `powershell -WindowStyle Hidden` still creates and paints a console for a
