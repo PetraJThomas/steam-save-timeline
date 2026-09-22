@@ -139,7 +139,7 @@ syncs. The daily timeline is an archive and is never the timeline you are
 
 ### Restoring a save
 
-1. Open the timeline browser, pick the game, pick the point. Opening a point
+1. Open the Timeline Browser, pick the game, pick the point. Opening a point
    lists exactly what it holds: every file, its size, and when it was last
    written. That is how you spot the bad save, because the one that dropped
    to 2 KB is the reset.
@@ -216,7 +216,7 @@ after all.
 | `steam_save_capture.ps1` | Taking a snapshot, shared by the watcher and setup. |
 | `steam_save_timelines.ps1` | Save branches: per-game branches, forks, canonicalising. |
 | `steam_save_roots.ps1` | Resolving Steam's root codes to real paths. `-Report` audits them. |
-| `steam_save_restore_gui.ps1` | The timeline browser. |
+| `steam_save_restore_gui.ps1` | The Timeline Browser: history, save branches, restore. |
 | `steam_save_theme.ps1` | One dark theme, shared by both windows. |
 | SteamSaveTimeline.ahk | Optional tray app and boot hook. |
 | un-hidden.vbs | Launches a script with no console window at all. Used by the shortcuts and the log-on task. |
@@ -231,7 +231,7 @@ history with `git log game/<name>-<appid>/main` instead.
 ### The optional tray app
 
 `SteamSaveTimeline.ahk` is a passive boot hook. It starts the watcher hidden at
-log on and keeps a tray icon offering *Open timeline browser*, *Snapshot
+log on and keeps a tray icon offering *Open Timeline Browser*, *Snapshot
 everything now*, *Restart capture*, *Start with Windows* and *Exit*.
 
 **You do not need AutoHotkey to run it.** A compiled exe bundles the AHK v2

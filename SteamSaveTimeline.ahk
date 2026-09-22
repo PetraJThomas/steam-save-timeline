@@ -1,4 +1,4 @@
-﻿#Requires AutoHotkey v2.0
+#Requires AutoHotkey v2.0
 #SingleInstance Force
 ;
 ; SteamSaveTimeline.ahk -- passive boot hook for the Steam save timeline.
@@ -48,7 +48,7 @@ return
 
 BuildTray() {
     A_TrayMenu.Delete()
-    A_TrayMenu.Add("Open timeline browser", (*) => RunPS(BROWSER, true))
+    A_TrayMenu.Add("Open Timeline Browser", (*) => RunPS(BROWSER, true))
     A_TrayMenu.Add("Snapshot everything now", (*) => SnapshotNow())
     A_TrayMenu.Add()
     A_TrayMenu.Add("Restart capture", (*) => RestartWatcher())
@@ -56,7 +56,7 @@ BuildTray() {
     A_TrayMenu.Add("Setup...", (*) => RunPS(SETUP, true))
     A_TrayMenu.Add()
     A_TrayMenu.Add("Exit", (*) => ExitApp())
-    A_TrayMenu.Default := "Open timeline browser"
+    A_TrayMenu.Default := "Open Timeline Browser"
     A_IconTip := "Steam Save Timeline - capturing"
     if FileExist(STARTUP_LNK)
         A_TrayMenu.Check("Start with Windows")

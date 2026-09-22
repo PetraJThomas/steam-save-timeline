@@ -629,10 +629,16 @@ function Invoke-Setup {
 
         if ($OptDesktop.IsChecked) {
             try {
-                $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Steam Save Timeline.lnk'
+                # Named for what it opens. The Startup shortcut is also called
+                # "Steam Save Timeline", and two identically named shortcuts
+                # doing different things is its own small cruelty.
+                $desktop = [Environment]::GetFolderPath('Desktop')
+                $legacy  = Join-Path $desktop 'Steam Save Timeline.lnk'
+                if (Test-Path $legacy) { Remove-Item $legacy -Force -ErrorAction SilentlyContinue }
+                $lnk = Join-Path $desktop 'Timeline Browser.lnk'
                 New-Shortcut $lnk 'wscript.exe' `
                     "`"$(Join-Path $PSScriptRoot 'run-hidden.vbs')`" steam_save_restore_gui.ps1" `
-                    $PSScriptRoot 'Browse and restore Steam Cloud saves'
+                    $PSScriptRoot 'Browse and restore your Steam Cloud save timeline'
                 Write-Log "[desktop] $lnk"
             } catch { Write-Log "[warn] could not create the desktop shortcut: $_" }
         }

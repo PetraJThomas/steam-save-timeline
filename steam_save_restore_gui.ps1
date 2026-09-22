@@ -376,7 +376,7 @@ function Invoke-RestoreFlow($Game, [string]$Hash, [string]$Label, [string]$Steam
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Steam Save Timeline" Width="1060" Height="660" MinWidth="880" MinHeight="520"
+        Title="Timeline Browser" Width="1060" Height="660" MinWidth="880" MinHeight="520"
         WindowStartupLocation="CenterScreen" Background="#0F1319"
         TextOptions.TextFormattingMode="Display" UseLayoutRounding="True">
 $SteamSaveTheme
@@ -391,7 +391,7 @@ $SteamSaveTheme
     <!-- header -->
     <Border Grid.Row="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="18,13">
       <DockPanel LastChildFill="False">
-        <TextBlock Text="Steam Save Timeline" FontSize="17" FontWeight="SemiBold" DockPanel.Dock="Left"/>
+        <TextBlock Text="Timeline Browser" FontSize="17" FontWeight="SemiBold" DockPanel.Dock="Left"/>
         <TextBlock Name="SubtitleText" DockPanel.Dock="Right" VerticalAlignment="Center"
                    FontSize="11" Foreground="{StaticResource Muted}"/>
       </DockPanel>
