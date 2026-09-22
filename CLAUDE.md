@@ -1,0 +1,172 @@
+﻿# Steam Save Timeline
+
+Git-backed timeline of Steam Cloud saves, so any bad sync (corrupt save
+uploaded, wrong conflict choice) is recoverable. Born from a real loss: a
+crash in a game running on Android uploaded a reset save, and choosing
+"remote" in Steam's conflict dialog destroyed the good local copy.
+Steam Cloud keeps no version history, this system is that history.
+
+## Architecture
+
+Windows PowerShell 5.1 compatible throughout, git on PATH. `README.md` is the
+user-facing doc; this file is the working notes.
+
+- `steam_save_setup.ps1`, first-run setup (the OOBE). Preflight checks, a
+  survey of what's actually in the library, the first sweep, and optionally
+  log-on start / desktop shortcut / remote. Idempotent: on an existing
+  install it reports state and repairs what's missing, so it doubles as a
+  diagnostic. Work runs on the UI thread with a dispatcher pump between
+  games (`Sync-Ui`) rather than a runspace, simpler, and the sweep is the
+  only slow part. Checks run on `ContentRendered`, not before `ShowDialog`,
+  so the window paints before the library survey stalls it.
+
+- `steam_save_capture.ps1`, taking a snapshot: `Initialize-Repo`,
+  `New-Snapshot`, `Invoke-Sweep`. Lifted out of the watcher so setup runs
+  the first sweep through exactly the code the daemon uses later. Progress
+  goes through `Set-CaptureLogger`, so the same functions write to a console
+  or into a window.
+
+- `steam_save_theme.ps1`, the dark theme as a XAML fragment, interpolated
+  into both windows. Not a ResourceDictionary file: keeping it a string
+  means no extra file to ship and the two windows cannot drift apart.
+
+- `SteamSaveTimeline.ahk`, optional AHK v2 tray app / boot hook. Starts the
+  watcher hidden and offers the browser from the tray. Compiled, it needs no
+  AHK installed (the exe bundles the v2 runtime); AHK is only needed to
+  rebuild. **It binds no hotkeys on purpose**. Hotkeys.exe is this
+  machine's single resident hotkey host and two hosts would fight. A hotkey
+  for the browser belongs in Hotkeys.ahk's BINDINGS table.
+
+- `steam_save_timelines.ps1`, save branches, dot-sourced by watcher and GUI.
+  **Every branch holds exactly one game.** That one rule is what makes save
+  branches work: git branches are repo-wide but a save timeline is per-game,
+  so a shared branch would mean forking one game's timeline rolled back every
+  other game's mirror.
+
+      game/<appid>/main     that game's canonical timeline
+      game/<appid>/daily    its daily snapshots (an archive, never active)
+      game/<appid>/<slug>   a save branch, a divergent playthrough
+      master                repo metadata only (games.json, timelines.json)
+
+  Exactly one timeline per game is *active* (`timelines.json`, appid -> branch,
+  absent = main); the watcher appends syncs to it. Commits are built with a
+  throwaway index, `read-tree` from the target branch, `add -A -- <appid>`,
+  `write-tree`, `commit-tree`, `update-ref`, so a branch is extended without
+  ever being checked out and without touching any other game or HEAD.
+
+- `steam_save_roots.ps1`, shared resolver, dot-sourced by the other two.
+  Parses Valve KeyValues (remotecache.vdf, libraryfolders.vdf,
+  appmanifest_*.acf), enumerates every Steam library, and maps a cloud
+  file's numeric `root` to a real directory. Verified root codes:
+  0 `remote`, 1 `gameinstall`, 2 `documents`, 3 `localappdata`,
+  4 `appdata`, 12 `locallow`. An unrecognised code is *probed*, try the
+  usual save locations and keep the one where the file actually is, so a
+  new root degrades to "found it anyway" rather than "skipped". Run it
+  directly with `-Report` for a per-game audit of roots and their paths;
+  that report is also how a new code gets verified before being added to
+  the table.
+
+- `steam_save_watcher.ps1`, the backend. FileSystemWatcher on
+  `userdata\<uid>\<appid>\remotecache.v*` (Steam's sync ledger, rewritten
+  after every upload AND download; current clients write `.vdf`, older ones
+  `.vcf`). On change: 15s debounce, wipe-and-recopy into
+  `%USERPROFILE%\steam-save-history\<appid>\` (so deletions show in git):
+    - `remote\` copied wholesale, catches files Steam hasn't indexed yet
+    - `roots\<root>\` per file, driven by the ledger, for saves that live
+      outside `remote\`; only listed paths are ever read
+    - `roots.json`, which real directory each root resolved to
+    - the ledger itself, for Steam's sha/remotetime metadata
+  Then commits to that game's *active* timeline, and pushes that branch if
+  an `origin` remote exists.
+
+  Separately it **sweeps** every game onto `game/<appid>/daily` at startup
+  and every `$DailySnapshotHours` (24). The split is the point: a commit on
+  a sync timeline means Steam actually moved data; a commit on a daily
+  timeline means "this is what was on disk at time T". Mixing them dilutes
+  both. The sweep is also the floor of coverage, at worst you lose a day,
+  even if Steam never restarts, and it seeds `main` for any game that does
+  not have a timeline yet, so every game has a canonical history from first
+  sight. Maintains `games.json` (appid -> name, from `appmanifest_*.acf`
+  across all libraries). Meant to run permanently via Task Scheduler "At log
+  on".
+
+- `steam_save_restore_gui.ps1`. WPF timeline browser, dark themed, all
+  styling inline in the XAML (no external theme assemblies, the zero-
+  dependency rule applies to the UI too; even the scrollbars are
+  retemplated, because the stock ones are light grey). Timelines are pill
+  buttons rather than a combo box, so a ComboBox ControlTemplate does not
+  have to be hand-rolled. Timeline rows are colour-coded by event kind:
+  SYNC (blue, Steam moved data), SNAPSHOT (slate, a sweep), RESTORE
+  (amber), CANONICAL (green), CREATED (grey), plus a FORKED HERE chip.
+  Game list from games.json; a timeline picker per game, and
+  one branch per game means history is just `git log game/<appid>/main`.
+  Beyond Restore it offers **Fork from here** (new save branch at the
+  selected point, becomes active), **Play this one** (make another timeline
+  active and load its latest save), and **Make canonical** (commit a save
+  branch's current state onto main, then go back to playing main). The point
+  where a save branch left main is marked in its timeline, so "roll back to
+  before I diverged" is one Restore on that row.
+  Restore: reads the target commit with `git ls-tree` and shows every
+  destination it would overwrite *before* touching anything; warns if
+  steam.exe is running and offers graceful `steam.exe -shutdown`; then
+  `git checkout <hash> -- <appid>/`, commits that on top as a RESTORE
+  commit *on the active timeline*, and copies `remote\` plus each
+  `roots\<root>\` back to the directory that root resolves to now (falling
+  back to the recorded roots.json if it cannot). Copies overwrite, never
+  delete, some destinations are game install folders. User launches game
+  and picks LOCAL if Steam shows a conflict.
+
+## Design principles (do not change without asking)
+
+- Roll-forward only. Never rebase/reset the mirror repo. A bad sync is a
+  commit; a restore is another commit on top. History is append-only. This
+  is why "make canonical" copies a branch's state onto main as a new commit
+  instead of merging or moving main's pointer, and why the save branch
+  survives the operation, in case it turns out to have been the better run.
+- One game per branch, no exceptions, including the daily timelines.
+- The mirror's working tree is a staging area, not a meaningful checkout:
+  commits are built through a throwaway index, so `git status` there is
+  noise. Read history with `git log game/<appid>/main`, not `git status`.
+- Watcher observes only, it never writes into Steam's folders. Only the
+  GUI's explicit restore touches Steam, and only after the Steam-running
+  gate.
+- Commit messages start with `[<appid>]`, fixed machine-parseable anchor.
+- Saves are opaque bytes. The repo sets `core.autocrlf false` and ships a
+  `.gitattributes` of `* -text`; a restored save must be byte-identical to
+  what Steam uploaded.
+- Root codes are only added to the table once verified on real data (an
+  entry from a live ledger resolving to a file that exists). Unverified
+  guesses stay out, the probe fallback covers them safely.
+- Root short names (`localappdata`, `gameinstall`, ...) are an on-disk
+  contract: renaming one orphans everything already committed under it.
+- Zero dependencies: PS 5.1 stdlib/.NET + git.
+
+## Open items (priority order)
+
+1. Commit the owner's recovered save (pulled from an old PC image) as the
+   known-good first entry for that game.
+2. No way to delete a save branch from the GUI yet, `git branch -D
+   game/<appid>/<slug>` by hand, and drop the entry from `timelines.json`
+   if it was active.
+3. Optional: scheduled daily Steam restart (`steam.exe -shutdown`, wait,
+   relaunch with `-silent`) to force a sync checkpoint, capping the loss
+   window for saves uploaded from other devices.
+4. Root 1 (`gameinstall`) resolves through `appmanifest_<appid>.acf`. If
+   the game is uninstalled the manifest is gone, so those saves cannot be
+   mirrored or restored until it is reinstalled, the report shows them as
+   missing rather than pretending otherwise.
+
+## Context notes
+
+- PC-side Steam only syncs a game at client login / game launch, so the
+  timeline density depends on how often Steam restarts (hence item 3).
+- The ledger is `remotecache.vdf` on current clients. An earlier version of
+  the watcher looked for `remotecache.vcf` only and therefore never fired
+  once; the filter is `remotecache.v*` for that reason. If snapshots ever
+  stop appearing, check that filename first.
+- git writes ordinary warnings to stderr. Under `$ErrorActionPreference =
+  'Stop'` with `2>&1`, PowerShell turns those into terminating errors and
+  silently aborts every snapshot. `Invoke-Git` in both scripts drops to
+  'Continue' and judges git by exit code only, don't "tidy" that away.
+- Mobile/Android capture was considered (Termux cron into the same repo)
+  but deprioritized, owner has stepped back from PC-emulation-on-Android.

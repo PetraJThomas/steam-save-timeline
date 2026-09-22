@@ -1,0 +1,3 @@
+﻿# the mirror repo lives in %USERPROFILE%, never inside this one
+steam-save-history/
+*.log
