@@ -1,5 +1,13 @@
 ﻿# Steam Save Timeline
 
+Repo: `C:\PersonalProjects\steam-save-timeline`, published at
+https://github.com/PetraJThomas/steam-save-timeline (public, MIT).
+`C:\Users\petra\Scripts` still holds a working copy alongside unrelated
+personal scripts; the repo is the source of truth, so change it there and
+copy across, not the other way round. The mirror of actual save data lives
+in `%USERPROFILE%\steam-save-history` and is gitignored: it must never end
+up inside the source repo.
+
 Git-backed timeline of Steam Cloud saves, so any bad sync (corrupt save
 uploaded, wrong conflict choice) is recoverable. Born from a real loss: a
 crash in a game running on Android uploaded a reset save, and choosing
