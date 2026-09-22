@@ -26,7 +26,10 @@ function Initialize-Capture([string]$MirrorDir) {
     Initialize-Timelines $MirrorDir
 }
 
-function Set-CaptureLogger([scriptblock]$Logger) { $script:CapLog = $Logger }
+function Set-CaptureLogger([scriptblock]$Logger) {
+    $script:CapLog = $Logger
+    Set-TimelineLogger $Logger   # lock and corruption warnings go the same way
+}
 function Write-Capture([string]$Message) { & $script:CapLog $Message }
 
 function Write-GamesJson([hashtable]$Names) {
@@ -301,6 +304,12 @@ function New-Snapshot {
     $dest   = Join-Path $script:CapMirror $appId
     if (-not $Branch) { $Branch = Get-ActiveTimeline $appId }
 
+    # The lock covers the copy as well as the commit. The wipe below empties a
+    # game's folder for a moment, and anything else staging that folder in that
+    # moment would record the game as deleted.
+    if (-not (Enter-TimelineLock)) { return $null }
+    try {
+
     # Mirror true state: wipe and recopy so deletions show up in git too.
     if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
     New-Item -ItemType Directory -Path $dest -Force | Out-Null
@@ -334,6 +343,8 @@ function New-Snapshot {
         Update-PlainCopy $appId $dest
     }
     return $commit
+
+    } finally { Exit-TimelineLock }
 }
 
 function Invoke-Sweep {

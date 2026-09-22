@@ -182,7 +182,7 @@ user-facing doc; this file is the working notes.
   across all libraries). Meant to run permanently via Task Scheduler "At log
   on".
 
-- `steam_save_restore_gui.ps1`. The **Timeline Browser** (that is its window title and header; the setup window is the other one). WPF, dark themed, all
+- `steam_save_restore_gui.ps1`. The **Steam Save Timeline Browser** (that is its window title and header; the setup window is the other one). WPF, dark themed, all
   styling inline in the XAML (no external theme assemblies, the zero-
   dependency rule applies to the UI too; even the scrollbars are
   retemplated, because the stock ones are light grey). Timelines are pill

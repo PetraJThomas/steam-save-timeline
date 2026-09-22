@@ -1,5 +1,5 @@
 ﻿<#
-steam_save_restore_gui.ps1: timeline browser, save branches, and restore.
+steam_save_restore_gui.ps1: the Steam Save Timeline Browser, save branches, restore.
 
 Reads games.json + the per-game branches written by steam_save_watcher.ps1.
 Every branch holds exactly one game (see steam_save_timelines.ps1), so a game's
@@ -374,7 +374,7 @@ function Invoke-RestoreFlow($Game, [string]$Hash, [string]$Label, [string]$Steam
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Timeline Browser" Width="1060" Height="660" MinWidth="880" MinHeight="520"
+        Title="Steam Save Timeline Browser" Width="1060" Height="660" MinWidth="880" MinHeight="520"
         WindowStartupLocation="CenterScreen" Background="#0F1319"
         TextOptions.TextFormattingMode="Display" UseLayoutRounding="True">
 $SteamSaveTheme
@@ -389,7 +389,7 @@ $SteamSaveTheme
     <!-- header -->
     <Border Grid.Row="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="18,13">
       <DockPanel LastChildFill="False">
-        <TextBlock Text="Timeline Browser" FontSize="17" FontWeight="SemiBold" DockPanel.Dock="Left"/>
+        <TextBlock Text="Steam Save Timeline Browser" FontSize="17" FontWeight="SemiBold" DockPanel.Dock="Left"/>
         <TextBlock Name="SubtitleText" DockPanel.Dock="Right" VerticalAlignment="Center"
                    FontSize="11" Foreground="{StaticResource Muted}"/>
       </DockPanel>

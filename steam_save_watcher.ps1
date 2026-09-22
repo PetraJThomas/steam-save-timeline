@@ -38,6 +38,30 @@ $DailySnapshotHours = $cfg.DailySnapshotHours
 
 Initialize-Capture $MirrorDir
 
+<#
+One watcher per mirror. Three were found running at once on the dev machine,
+and two of them racing produced an empty save point and a commit carrying
+another game's files. The snapshot lock now prevents that corruption, but a
+second watcher is still pure waste: duplicate sweeps, duplicate pushes, and
+every snapshot queueing behind another process doing the same work.
+
+Held for the life of the process. Deliberately not released anywhere: when this
+exits, by any route, Windows drops it.
+#>
+$script:InstanceLock = $null
+$lockName = 'SteamSaveTimelineWatcher-' + ([BitConverter]::ToString(
+    [System.Security.Cryptography.MD5]::Create().ComputeHash(
+        [Text.Encoding]::UTF8.GetBytes($MirrorDir.ToLowerInvariant()))) -replace '-', '')
+try   { $script:InstanceLock = [System.Threading.Mutex]::new($false, "Global\$lockName") }
+catch { $script:InstanceLock = [System.Threading.Mutex]::new($false, $lockName) }
+$gotIt = $false
+try { $gotIt = $script:InstanceLock.WaitOne(0) }
+catch [System.Threading.AbandonedMutexException] { $gotIt = $true }
+if (-not $gotIt) {
+    Write-Host "[exit] another watcher is already running for $MirrorDir"
+    return
+}
+
 $steamRoot = Find-SteamRoot
 $userdata  = Join-Path $steamRoot 'userdata'
 Initialize-Repo

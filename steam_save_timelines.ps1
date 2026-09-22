@@ -31,8 +31,87 @@ Dot-sourced by the watcher and the restore GUI. Call Initialize-Timelines first.
 
 $script:TLMirror = $null
 $script:TLMeta   = $null
+$script:TLLog       = { param($Message) Write-Host $Message }
+$script:TLLock      = $null
+$script:TLLockDepth = 0
+
+function Set-TimelineLogger([scriptblock]$Logger) { $script:TLLog = $Logger }
+function Write-Timeline([string]$Message) { & $script:TLLog $Message }
+
+# ---------------- one writer at a time ----------------
+
+<#
+The mirror has one working tree and one set of refs, and a commit is built by
+staging files on disk. Two processes doing that at once corrupt each other:
+not theoretical, two watchers running together produced both an empty commit
+and a commit holding another game's files. A named mutex rather than a lock
+file, so a process dying while holding it is reported rather than wedging
+every later snapshot forever.
+#>
+
+function Get-TimelineLockName {
+    # Named per mirror, so two mirrors never block each other. A mutex name
+    # cannot contain a backslash, so the path is hashed rather than embedded.
+    $md5 = [System.Security.Cryptography.MD5]::Create()
+    try {
+        $hash = [BitConverter]::ToString(
+            $md5.ComputeHash([Text.Encoding]::UTF8.GetBytes(
+                ([string]$script:TLMirror).ToLowerInvariant()))).Replace('-', '')
+    } finally { $md5.Dispose() }
+    return "SteamSaveTimeline-$hash"
+}
+
+function Enter-TimelineLock([int]$TimeoutSeconds = 180) {
+    <#
+    Returns $true when the lock is held. Re-entrant on the same thread, so a
+    snapshot can take it once and the commit inside it can take it again.
+    #>
+    if ($script:TLLockDepth -gt 0) { $script:TLLockDepth++; return $true }
+
+    if (-not $script:TLLock) {
+        $name = Get-TimelineLockName
+        # Global first, so a watcher running as a scheduled task in another
+        # session still excludes one started from the tray. Not every context
+        # is allowed to create a global mutex, hence the fallback.
+        try   { $script:TLLock = [System.Threading.Mutex]::new($false, "Global\$name") }
+        catch { $script:TLLock = [System.Threading.Mutex]::new($false, $name) }
+    }
+
+    $held = $false
+    try {
+        $held = $script:TLLock.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds))
+    } catch [System.Threading.AbandonedMutexException] {
+        # The previous holder died mid-write. The lock is ours now, but the
+        # mirror may have been left half-written, so say so out loud.
+        Write-Timeline '[warn] a previous snapshot exited while writing; continuing'
+        $held = $true
+    }
+    if (-not $held) {
+        Write-Timeline "[warn] another snapshot held the mirror for over $TimeoutSeconds s; skipping this one"
+        return $false
+    }
+    $script:TLLockDepth = 1
+    return $true
+}
+
+function Exit-TimelineLock {
+    if ($script:TLLockDepth -le 0) { return }
+    $script:TLLockDepth--
+    if ($script:TLLockDepth -eq 0 -and $script:TLLock) {
+        try { $script:TLLock.ReleaseMutex() } catch { }
+    }
+}
+
 
 function Initialize-Timelines([string]$MirrorDir) {
+    if ($script:TLLock -and $script:TLMirror -ne $MirrorDir) {
+        # The lock is named after the mirror, so pointing at a different one
+        # means the old mutex no longer guards anything we care about.
+        if ($script:TLLockDepth -gt 0) { try { $script:TLLock.ReleaseMutex() } catch { } }
+        $script:TLLock.Dispose()
+        $script:TLLock      = $null
+        $script:TLLockDepth = 0
+    }
     $script:TLMirror = $MirrorDir
     $script:TLMeta   = $null
 }
@@ -215,8 +294,13 @@ function New-PathCommit {
     #>
     param([string[]]$Paths, [string]$Branch, [string]$Message)
 
-    $idx = Join-Path $script:TLMirror '.git\timeline-index'
+    # Unique per call. A fixed name was shared by every concurrent snapshot,
+    # and one process deleting it between another's add and write-tree
+    # silently yielded the empty tree, which then got committed.
+    $idx = Join-Path $script:TLMirror ('.git\timeline-index-{0}-{1}' -f $PID, [guid]::NewGuid().ToString('N'))
     if (Test-Path $idx) { Remove-Item $idx -Force -ErrorAction SilentlyContinue }
+
+    if (-not (Enter-TimelineLock)) { return $null }
 
     $parent = $null
     if (Test-Timeline $Branch) { $parent = Get-GitLine @('rev-parse', $Branch) }
@@ -235,6 +319,14 @@ function New-PathCommit {
         $tree = Get-GitLine @('write-tree')
         if (-not $tree) { return $null }
 
+        # Every caller stages .gitattributes, so an empty tree cannot be a real
+        # result. It means the index went missing underneath us. Committing it
+        # would write a save point containing nothing at all.
+        if ($tree -eq '4b825dc642cb6eb9a060e54bf8d69288fbee4904') {
+            Write-Timeline "[warn] refusing an empty commit on $Branch; the index was lost mid-write"
+            return $null
+        }
+
         if ($parent) {
             if ($tree -eq (Get-GitLine @('rev-parse', "$Branch^{tree}"))) { return $null }   # nothing new
             $commit = Get-GitLine @('commit-tree', $tree, '-p', $parent, '-m', $Message)
@@ -247,6 +339,7 @@ function New-PathCommit {
     } finally {
         Remove-Item env:GIT_INDEX_FILE -ErrorAction SilentlyContinue
         if (Test-Path $idx) { Remove-Item $idx -Force -ErrorAction SilentlyContinue }
+        Exit-TimelineLock
     }
 }
 
@@ -262,16 +355,22 @@ function Expand-AppTree([string]$AppId, [string]$Commit) {
     `git checkout <commit> -- <path>` does not delete files that exist now but
     not in that commit, which would otherwise smuggle extra files into a restore.
     #>
+    # Held across the wipe as well as the checkout: a snapshot walking in
+    # between the two would find the folder gone and stage the whole game
+    # as deleted.
+    if (-not (Enter-TimelineLock)) { return $false }
+
     $dir = Join-Path $script:TLMirror $AppId
     if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
 
-    $idx = Join-Path $script:TLMirror '.git\timeline-checkout-index'
+    $idx = Join-Path $script:TLMirror ('.git\timeline-checkout-index-{0}-{1}' -f $PID, [guid]::NewGuid().ToString('N'))
     if (Test-Path $idx) { Remove-Item $idx -Force -ErrorAction SilentlyContinue }
     $env:GIT_INDEX_FILE = $idx
     try { return ((Invoke-Git @('checkout', $Commit, '--', "$AppId/")) -eq 0) }
     finally {
         Remove-Item env:GIT_INDEX_FILE -ErrorAction SilentlyContinue
         if (Test-Path $idx) { Remove-Item $idx -Force -ErrorAction SilentlyContinue }
+        Exit-TimelineLock
     }
 }
 

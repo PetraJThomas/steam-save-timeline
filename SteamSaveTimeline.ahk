@@ -4,7 +4,7 @@
 ; SteamSaveTimeline.ahk -- passive boot hook for the Steam save timeline.
 ;
 ; Starts steam_save_watcher.ps1 hidden at log on and keeps a tray icon so the
-; timeline browser is one click away. The PowerShell scripts do all the work
+; Steam Save Timeline Browser is one click away. The PowerShell scripts do all the work
 ; and are unchanged by this; nothing here is required to use them.
 ;
 ; IT BINDS NO HOTKEYS, deliberately. Hotkeys.exe is the single resident hotkey
@@ -53,7 +53,7 @@ return
 
 BuildTray() {
     A_TrayMenu.Delete()
-    A_TrayMenu.Add("Open Timeline Browser", (*) => RunPS(BROWSER, true))
+    A_TrayMenu.Add("Open Steam Save Timeline Browser", (*) => RunPS(BROWSER, true))
     A_TrayMenu.Add("Snapshot everything now", (*) => SnapshotNow())
     A_TrayMenu.Add()
     A_TrayMenu.Add("Restart capture", (*) => RestartWatcher())
@@ -61,7 +61,7 @@ BuildTray() {
     A_TrayMenu.Add("Setup...", (*) => RunPS(SETUP, true))
     A_TrayMenu.Add()
     A_TrayMenu.Add("Exit", (*) => ExitApp())
-    A_TrayMenu.Default := "Open Timeline Browser"
+    A_TrayMenu.Default := "Open Steam Save Timeline Browser"
     ; Windows' own "previous versions" icon. Not the cloud nearby (that is the
     ; OneDrive glyph, and this tool offers OneDrive as a destination) and not
     ; the sync arrows nearby (an overlay badge: 22% fill, so it shrinks to a

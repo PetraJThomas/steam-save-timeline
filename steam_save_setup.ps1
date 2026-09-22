@@ -3,7 +3,7 @@ steam_save_setup.ps1: first-run setup for the Steam save timeline.
 
 Checks the prerequisites, says plainly what it found in your Steam library,
 then builds the mirror and takes the first snapshot of every game. It can also
-arrange for capture to start when you log in, put the timeline browser on your
+arrange for capture to start when you log in, put the Steam Save Timeline Browser on your
 desktop, and attach a private remote so the history survives the drive.
 
 Safe to re-run: everything it does is idempotent. On an existing install it
@@ -556,7 +556,7 @@ $SteamSaveTheme
               <Button Name="BuildExeBtn" Content="Build the tray app" Style="{StaticResource Btn}"
                       HorizontalAlignment="Left" Margin="0,8,0,0" Padding="10,4" FontSize="11" Visibility="Collapsed"/>
             </StackPanel>
-            <CheckBox Name="OptDesktop" IsChecked="True" Content="Desktop shortcut that opens the Timeline Browser" Margin="0,12,0,0"/>
+            <CheckBox Name="OptDesktop" IsChecked="True" Content="Desktop shortcut that opens the Steam Save Timeline Browser" Margin="0,12,0,0"/>
             <CheckBox Name="OptFolderLinks" Content="Desktop shortcuts to the save folders themselves" Margin="0,10,0,0"/>
             <!--
               One radio group that includes "no", rather than a checkbox gating
@@ -928,7 +928,7 @@ function Invoke-Setup {
         }
 
         $script:Done = $true
-        $GoBtn.Content   = 'Open the timeline browser'
+        $GoBtn.Content   = 'Open the Steam Save Timeline Browser'
         $GoBtn.IsEnabled = $true
         $StatusText.Text = if ($copyProblem) {
             "Capture is set up, but the second copy was NOT made: $copyProblem. Everything else is done."

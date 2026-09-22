@@ -3,7 +3,7 @@ steam_save_theme.ps1: the dark theme, shared by every window in this project.
 
 Held here as a XAML fragment rather than a ResourceDictionary file so it can be
 interpolated straight into each window's markup: no external theme assembly, no
-extra file to ship, and the timeline browser and the setup window cannot drift
+extra file to ship, and the Steam Save Timeline Browser and the setup window cannot drift
 apart. Inject it with "$SteamSaveTheme" inside a double-quoted here-string.
 
 Palette: near-black ground, two panel greys, Steam-ish blue accent. Even the

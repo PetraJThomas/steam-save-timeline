@@ -78,7 +78,7 @@ $C = @{
 
 $Checks = @(
     # --- main window: header and chrome
-    @{ W='browser'; T='Title "Steam Save Timeline"';  Fg=$C.Text;   Bg=$C.Panel;  S=17;   B=$false }
+    @{ W='browser'; T='Title "Steam Save Timeline Browser"';  Fg=$C.Text;   Bg=$C.Panel;  S=17;   B=$false }
     @{ W='browser'; T='Subtitle (game count, path)';  Fg=$C.Muted;  Bg=$C.Panel;  S=11;   B=$false }
     @{ W='browser'; T='GAMES caption';                Fg=$C.Muted;  Bg=$C.Panel;  S=10;   B=$false }
     @{ W='browser'; T='Games caption icon';           Fg=$C.Muted;  Bg=$C.Panel;  S=12;   B=$false; K='graphic' }
