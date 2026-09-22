@@ -255,13 +255,22 @@ function New-FolderShortcut([string]$Path, [string]$Target, [string]$Desc) {
     $s.Save()
 }
 
-function New-Shortcut([string]$Path, [string]$Target, [string]$Arguments, [string]$WorkDir, [string]$Desc) {
+function New-Shortcut {
+    <#
+    $IconLocation matters for anything launched through wscript or powershell.
+    Without it the shortcut shows the HOST program's icon, which is why the
+    desktop shortcut looked like a script file rather than this app.
+    #>
+    param([string]$Path, [string]$Target, [string]$Arguments, [string]$WorkDir,
+          [string]$Desc, [string]$IconLocation)
+
     $sh = New-Object -ComObject WScript.Shell
     $s  = $sh.CreateShortcut($Path)
     $s.TargetPath       = $Target
     $s.Arguments        = $Arguments
     $s.WorkingDirectory = $WorkDir
     $s.Description      = $Desc
+    if ($IconLocation) { $s.IconLocation = $IconLocation }
     $s.Save()
 }
 
@@ -299,7 +308,19 @@ function Register-AtLogon([string]$Method) {
 
 function Connect-FolderCopy([string]$Folder) {
     <# An external drive, a synced folder, a NAS share. No account, no concepts. #>
-    if (-not (Test-Path $Folder)) { throw "that folder doesn't exist: $Folder" }
+    if (-not (Test-Path $Folder)) {
+        # Create it. Refusing was absurd: Choose... appends a subfolder name to
+        # whatever was picked, so the tool invented a path and then complained
+        # the path did not exist. A drive that is not there is a real problem
+        # though, and says so rather than being silently invented.
+        $root = [IO.Path]::GetPathRoot($Folder)
+        if ($root -and -not (Test-Path $root)) {
+            throw "that drive is not available: $root"
+        }
+        try { New-Item -ItemType Directory -Path $Folder -Force | Out-Null }
+        catch { throw "could not create $Folder ($($_.Exception.Message))" }
+        Write-Log "[copy] created $Folder"
+    }
     $target = Join-Path $Folder 'steam-save-history.git'
     if (-not (Test-Path $target)) {
         & git init --bare --quiet -- $target 2>&1 | Out-Null
@@ -709,7 +730,8 @@ function Invoke-Setup {
                 $lnk = Join-Path $desktop 'Timeline Browser.lnk'
                 New-Shortcut $lnk 'wscript.exe' `
                     "`"$(Join-Path $PSScriptRoot 'run-hidden.vbs')`" steam_save_restore_gui.ps1" `
-                    $PSScriptRoot 'Browse and restore your Steam Cloud save timeline'
+                    $PSScriptRoot 'Browse and restore your Steam Cloud save timeline' `
+                    "$(Join-Path $PSScriptRoot 'SteamSaveTimeline.ico'),0"
                 Write-Log "[desktop] $lnk"
             } catch { Write-Log "[warn] could not create the desktop shortcut: $_" }
         }
