@@ -22,16 +22,14 @@ The point at which a save branch left main is marked DIVERGED HERE, so
 Run:  powershell -ExecutionPolicy Bypass -File steam_save_restore_gui.ps1
 #>
 
-# ---------------- config ----------------
-$MirrorDir = Join-Path $env:USERPROFILE 'steam-save-history'
-# ----------------------------------------
-
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework
 
+. (Join-Path $PSScriptRoot 'steam_save_settings.ps1')
 . (Join-Path $PSScriptRoot 'steam_save_dialogs.ps1')  # brings the theme with it
 . (Join-Path $PSScriptRoot 'steam_save_roots.ps1')
 . (Join-Path $PSScriptRoot 'steam_save_timelines.ps1') # supplies Invoke-Git / Get-GitOutput
+$MirrorDir = (Get-SteamSaveSettings).MirrorDir
 Initialize-Timelines $MirrorDir
 
 # A timeline row. A real notifying type rather than a PSCustomObject because the

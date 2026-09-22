@@ -64,6 +64,14 @@ user-facing doc; this file is the working notes.
   pushes for exactly that reason: without it the second copy kept every save
   but froze games.json and timelines.json at day one.
 
+- `steam_save_settings.ps1` / `settings.json`, the single source for mirror
+  path, debounce, daily interval and task name. `$MirrorDir` used to be
+  declared separately in three scripts; three copies of a path that must agree
+  is a bug waiting to happen. Configuration ONLY: state (task installed,
+  shortcut present, active timeline, remote url) is always read from the thing
+  itself, so settings can never disagree with reality. Gitignored, created on
+  demand, malformed file falls back to defaults rather than stopping capture.
+
 - `run-hidden.vbs`, a three-line WScript shim. Everything launched from a
   shortcut or the log-on task goes through it, because
   `powershell -WindowStyle Hidden` still creates and paints a console for a

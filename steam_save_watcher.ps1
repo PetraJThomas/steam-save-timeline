@@ -24,15 +24,18 @@ Requires git on PATH.
 #>
 param([switch]$Once)
 
-# ---------------- config ----------------
-$MirrorDir          = Join-Path $env:USERPROFILE 'steam-save-history'
-$DebounceSeconds    = 15
-$DailySnapshotHours = 24
-# ----------------------------------------
-
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'steam_save_settings.ps1')
 . (Join-Path $PSScriptRoot 'steam_save_capture.ps1')
+
+# Config comes from settings.json beside the scripts, so the mirror path cannot
+# disagree between this, the setup window and the browser.
+$cfg                = Get-SteamSaveSettings
+$MirrorDir          = $cfg.MirrorDir
+$DebounceSeconds    = $cfg.DebounceSeconds
+$DailySnapshotHours = $cfg.DailySnapshotHours
+
 Initialize-Capture $MirrorDir
 
 $steamRoot = Find-SteamRoot

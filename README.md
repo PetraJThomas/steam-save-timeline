@@ -218,6 +218,7 @@ after all.
 | `steam_save_roots.ps1` | Resolving Steam's root codes to real paths. `-Report` audits them. |
 | `steam_save_restore_gui.ps1` | The Timeline Browser: history, save branches, restore. |
 | `steam_save_theme.ps1` | One dark theme, shared by both windows. |
+| `steam_save_settings.ps1` | Loads `settings.json`: mirror path, debounce, daily interval, task name. |
 | SteamSaveTimeline.ahk | Optional tray app and boot hook. |
 | un-hidden.vbs | Launches a script with no console window at all. Used by the shortcuts and the log-on task. |
 
@@ -282,6 +283,28 @@ out of scope rather than being quietly left out of the list.
 
 Icons come from the system icon font (Segoe Fluent Icons, falling back to Segoe
 MDL2 Assets), so there is nothing to install and no missing-glyph boxes.
+
+## Configuration
+
+`settings.json` sits beside the scripts and is created with defaults the first
+time anything runs. Values may use environment variables.
+
+```json
+{
+  "mirrorDir": "%USERPROFILE%\\steam-save-history",
+  "debounceSeconds": 15,
+  "dailySnapshotHours": 24,
+  "taskName": "Steam Save Timeline"
+}
+```
+
+It is gitignored, so pulling an update never fights it, and a malformed file
+falls back to defaults with a warning rather than stopping capture.
+
+It holds **configuration only**. Whether the scheduled task exists, whether a
+startup shortcut is there, which timeline is active, where the second copy
+points: all of that is read from the thing itself, so a settings file can never
+disagree with reality.
 
 ## Known limitations
 

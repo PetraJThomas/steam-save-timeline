@@ -12,17 +12,16 @@ reports the current state and can repair the pieces that are missing.
 Run:  powershell -ExecutionPolicy Bypass -File steam_save_setup.ps1
 #>
 
-# ---------------- config ----------------
-$MirrorDir = Join-Path $env:USERPROFILE 'steam-save-history'
-$TaskName  = 'Steam Save Timeline'
-# ----------------------------------------
-
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName System.Windows.Forms      # FolderBrowserDialog
 
+. (Join-Path $PSScriptRoot 'steam_save_settings.ps1')
 . (Join-Path $PSScriptRoot 'steam_save_theme.ps1')
 . (Join-Path $PSScriptRoot 'steam_save_capture.ps1')   # brings roots + timelines with it
+$cfg       = Get-SteamSaveSettings
+$MirrorDir = $cfg.MirrorDir
+$TaskName  = $cfg.TaskName
 Initialize-Capture $MirrorDir
 
 $script:SteamRoot = $null
@@ -372,9 +371,19 @@ $SteamSaveTheme
                       HorizontalAlignment="Left" Margin="0,8,0,0" Padding="10,4" FontSize="11" Visibility="Collapsed"/>
             </StackPanel>
             <CheckBox Name="OptDesktop" IsChecked="True" Content="Put the timeline browser on my desktop" Margin="0,12,0,0"/>
-            <CheckBox Name="OptRemote" Content="Keep a second copy off this drive (a dead drive takes the timeline with it)" Margin="0,12,0,0"/>
-            <StackPanel Name="RemotePanel" Margin="24,8,0,0" IsEnabled="False">
-              <RadioButton Name="RemoteFolder" GroupName="remote" IsChecked="True"
+            <!--
+              One radio group that includes "no", rather than a checkbox gating
+              a disabled panel. The old shape had two traps: clicking a
+              destination while the panel was still disabled was swallowed, and
+              the pre-checked default then won silently. Nothing here is
+              disabled and nothing is pre-selected except "not right now", so
+              the destination used is always the one actually clicked.
+            -->
+            <TextBlock Text="A second copy, off this drive. A dead drive takes the timeline with it."
+                       Margin="0,16,0,0" FontSize="12.5" Foreground="{StaticResource Text}"/>
+            <StackPanel Name="RemotePanel" Margin="24,8,0,0">
+              <RadioButton Name="CopyNone" GroupName="remote" IsChecked="True" Content="Not right now"/>
+              <RadioButton Name="RemoteFolder" GroupName="remote" Margin="0,10,0,0"
                            Content="A folder - external drive, OneDrive, or a network share. No account needed."/>
               <DockPanel Margin="20,5,0,0">
                 <Button Name="BrowseBtn" Content="Choose..." Style="{StaticResource Btn}" DockPanel.Dock="Right" Margin="6,0,0,0"/>
@@ -429,7 +438,7 @@ $MethodPanel   = $window.FindName('MethodPanel')
 $MethodExe     = $window.FindName('MethodExe')
 $MethodTask    = $window.FindName('MethodTask')
 $OptDesktop    = $window.FindName('OptDesktop')
-$OptRemote     = $window.FindName('OptRemote')
+$CopyNone      = $window.FindName('CopyNone')
 $RemotePanel   = $window.FindName('RemotePanel')
 $RemoteFolder  = $window.FindName('RemoteFolder')
 $RemoteGitHub  = $window.FindName('RemoteGitHub')
@@ -643,24 +652,45 @@ function Invoke-Setup {
             } catch { Write-Log "[warn] could not create the desktop shortcut: $_" }
         }
 
-        if ($OptRemote.IsChecked) {
+        # A backup tool must never report success for a backup it did not make,
+        # so every way this can come up empty is captured and surfaced, not
+        # just written into a log.
+        $copyProblem = $null
+        if (-not $CopyNone.IsChecked) {
             try {
                 $url = $null
-                if     ($RemoteFolder.IsChecked) {
+                if ($RemoteFolder.IsChecked) {
                     if ($FolderPath.Text.Trim()) { $url = Connect-FolderCopy $FolderPath.Text.Trim() }
-                    else { Write-Log '[copy] no folder chosen, skipped' }
+                    else { $copyProblem = 'no folder was chosen' }
                 }
-                elseif ($RemoteGitHub.IsChecked) { $url = Connect-GitHubRepo }
-                elseif ($RemoteUrl.Text.Trim())  { $url = $RemoteUrl.Text.Trim() }
+                elseif ($RemoteGitHub.IsChecked) {
+                    $url = Connect-GitHubRepo
+                    if (-not $url) { $copyProblem = 'the online backup was not completed' }
+                }
+                elseif ($RemoteUrlOpt.IsChecked) {
+                    if ($RemoteUrl.Text.Trim()) { $url = $RemoteUrl.Text.Trim() }
+                    else { $copyProblem = 'no git URL was entered' }
+                }
 
-                if ($url) { Write-Log "[copy] $(Save-SecondCopy $url)" }
-            } catch { Write-Log "[warn] second copy: $_" }
+                if ($url) {
+                    $msg = Save-SecondCopy $url
+                    Write-Log "[copy] $msg"
+                    if ($msg -notlike 'every timeline copied*') { $copyProblem = $msg }
+                }
+            } catch {
+                $copyProblem = "$_"
+                Write-Log "[warn] second copy: $_"
+            }
         }
 
         $script:Done = $true
         $GoBtn.Content   = 'Open the timeline browser'
         $GoBtn.IsEnabled = $true
-        $StatusText.Text = 'Done. Capture runs from now on; every sync Steam makes becomes a point you can go back to.'
+        $StatusText.Text = if ($copyProblem) {
+            "Capture is set up, but the second copy was NOT made: $copyProblem. Everything else is done."
+        } else {
+            'Done. Capture runs from now on; every sync Steam makes becomes a point you can go back to.'
+        }
         Write-Log ''
         Write-Log "Mirror: $MirrorDir"
         Write-Log 'Nothing in Steam was modified, the watcher only reads.'
@@ -671,8 +701,6 @@ function Invoke-Setup {
     }
 }
 
-$OptRemote.Add_Checked({   $RemotePanel.IsEnabled = $true })
-$OptRemote.Add_Unchecked({ $RemotePanel.IsEnabled = $false })
 $RemoteUrlOpt.Add_Checked({   $RemoteUrl.IsEnabled = $true; $RemoteUrl.Focus() })
 $RemoteUrlOpt.Add_Unchecked({ $RemoteUrl.IsEnabled = $false })
 
@@ -706,6 +734,16 @@ $OptLogon.Add_Checked({    $MethodPanel.IsEnabled = $true })
 $OptLogon.Add_Unchecked({  $MethodPanel.IsEnabled = $false })
 
 $GoBtn.Add_Click({
+    if (-not $script:Done) {
+        if ($RemoteFolder.IsChecked -and -not $FolderPath.Text.Trim()) {
+            $StatusText.Text = 'Choose the folder for the second copy first, or pick "Not right now".'
+            return
+        }
+        if ($RemoteUrlOpt.IsChecked -and -not $RemoteUrl.Text.Trim()) {
+            $StatusText.Text = 'Enter the git URL, or pick another destination.'
+            return
+        }
+    }
     if ($script:Done) {
         Start-Process wscript -ArgumentList "`"$(Join-Path $PSScriptRoot 'run-hidden.vbs')`"", 'steam_save_restore_gui.ps1'
         $window.Close()
