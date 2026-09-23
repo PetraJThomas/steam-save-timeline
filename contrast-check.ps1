@@ -105,6 +105,9 @@ $Checks = @(
     @{ W='browser'; T='Button border vs page';        Fg=$C.BtnLine; Bg=$C.Bg;    S=1; B=$false; K='graphic' }
     @{ W='browser'; T='Button border vs panel';       Fg=$C.BtnLine; Bg=$C.Panel; S=1; B=$false; K='graphic' }
     @{ W='browser'; T='Text input border';            Fg=$C.BtnLine; Bg=$C.Panel; S=1; B=$false; K='graphic' }
+    @{ W='browser'; T='Search placeholder';                Fg=$C.Muted;  Bg=$C.Panel2; S=12;   B=$false }
+    @{ W='browser'; T='Search text typed';                 Fg=$C.Text;   Bg=$C.Panel2; S=12;   B=$false }
+    @{ W='browser'; T='No games match';                    Fg=$C.Muted;  Bg=$C.Panel;  S=12;   B=$false }
     @{ W='browser'; T='Card outline (decorative)';    Fg=$C.Line;    Bg=$C.Bg;    S=1; B=$false; K='decorative' }
 
     # --- timeline rows

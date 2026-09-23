@@ -485,6 +485,18 @@ $SteamSaveTheme
             <TextBlock Text="GAMES" FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"
                        Foreground="{StaticResource Muted}"/>
           </StackPanel>
+          <!-- Search. WPF has no placeholder, so the hint is a TextBlock behind
+               the box, hidden the moment anything is typed. IsHitTestVisible
+               false so clicking the hint still lands in the box. -->
+          <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
+            <TextBox Name="GameSearch"/>
+            <TextBlock Name="GameSearchHint" Text="Search games" IsHitTestVisible="False"
+                       Foreground="{StaticResource Muted}" FontSize="12"
+                       Margin="9,0,0,0" VerticalAlignment="Center"/>
+          </Grid>
+          <TextBlock Name="NoGameMatch" DockPanel.Dock="Top" Visibility="Collapsed"
+                     Text="No games match that." TextWrapping="Wrap" FontSize="12"
+                     Foreground="{StaticResource Muted}" Margin="10,6,10,0"/>
           <ListBox Name="GameList" Style="{StaticResource List}" ItemContainerStyle="{StaticResource Row}">
             <ListBox.ItemTemplate>
               <DataTemplate>
@@ -617,6 +629,9 @@ $SteamSaveTheme
 $window       = [Windows.Markup.XamlReader]::Load([System.Xml.XmlNodeReader]::new($xaml))
 $appIcon      = Get-AppIcon; if ($appIcon) { $window.Icon = $appIcon }
 $GameList     = $window.FindName('GameList')
+$GameSearch   = $window.FindName('GameSearch')
+$GameSearchHint = $window.FindName('GameSearchHint')
+$NoGameMatch  = $window.FindName('NoGameMatch')
 $TimelineBar  = $window.FindName('TimelineBar')
 $TimelineList = $window.FindName('TimelineList')
 $RestoreBtn   = $window.FindName('RestoreBtn')
@@ -641,11 +656,65 @@ $appIds = @(Get-ChildItem $MirrorDir -Directory | Where-Object Name -match '^\d+
 $script:loading         = $false
 $script:CurrentTimeline = $null
 
+# The full list is kept aside so filtering never has to re-read the mirror, and
+# so clearing the box restores the original order exactly.
+$script:AllGames = @()
 foreach ($id in ($appIds | Sort-Object { if ($games[$_]) { $games[$_] } else { "zzz$_" } })) {
     $name = if ($games[$id]) { $games[$id] } else { "app $id" }
-    [void]$GameList.Items.Add([pscustomobject]@{ AppId = $id; Name = $name })
+    $script:AllGames += [pscustomobject]@{ AppId = $id; Name = $name }
 }
-$SubtitleText.Text = "$($GameList.Items.Count) games mirrored   ·   $MirrorDir"
+$script:GameCount = $script:AllGames.Count
+
+function Update-GameFilter {
+    <#
+    Filter by name or appid. The appid matters: a game captured before its name
+    was known shows as "app 389140", and the number is the only thing the person
+    has to go on. Matching is plain substring, case-insensitive, because this is
+    a list of thirty things and not a search engine.
+
+    Selection is preserved when the selected game survives the filter, so typing
+    does not throw away the timeline someone is looking at.
+    #>
+    $q = $GameSearch.Text.Trim()
+    # Escaped, because -like treats * ? and [ as wildcards and a game title can
+    # contain them. Typing a bracket should look for a bracket.
+    $pat  = if ($q) { '*' + [Management.Automation.WildcardPattern]::Escape($q) + '*' } else { $null }
+    # The outer @() is load-bearing. Assigning from an if-expression unrolls a
+    # one-element array to a bare object, and then .Count is $null rather than
+    # 1, so "exactly one game matches" silently skipped selecting it and showed
+    # a blank count.
+    $keep = @(if ($q) {
+        @($script:AllGames | Where-Object { $_.Name -like $pat -or $_.AppId -like $pat })
+    } else { $script:AllGames })
+
+    $wasSelected = $GameList.SelectedItem
+    $GameList.Items.Clear()
+    foreach ($g in $keep) { [void]$GameList.Items.Add($g) }
+
+    $GameSearchHint.Visibility = if ($q) { 'Collapsed' } else { 'Visible' }
+    $NoGameMatch.Visibility    = if ($keep.Count -eq 0 -and $q) { 'Visible' } else { 'Collapsed' }
+
+    if ($keep.Count -gt 0) {
+        $again = $null
+        if ($wasSelected) { $again = $keep | Where-Object { $_.AppId -eq $wasSelected.AppId } | Select-Object -First 1 }
+        $GameList.SelectedItem = if ($again) { $again } else { $keep[0] }
+    }
+
+    $SubtitleText.Text = if ($q -and $keep.Count -ne $script:GameCount) {
+        "$($keep.Count) of $($script:GameCount) games   ·   $MirrorDir"
+    } else {
+        "$($script:GameCount) games mirrored   ·   $MirrorDir"
+    }
+}
+
+foreach ($g in $script:AllGames) { [void]$GameList.Items.Add($g) }
+$SubtitleText.Text = "$($script:GameCount) games mirrored   ·   $MirrorDir"
+$GameSearch.Add_TextChanged({ Update-GameFilter })
+# Escape clears rather than closing the window, which is what a search box
+# should do while it has focus.
+$GameSearch.Add_KeyDown({
+    if ($_.Key -eq 'Escape' -and $GameSearch.Text) { $GameSearch.Text = ''; $_.Handled = $true }
+})
 
 function Update-TimelineBar($Game) {
     $script:loading = $true
