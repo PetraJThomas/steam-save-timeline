@@ -50,7 +50,7 @@ $SteamSaveTheme = @'
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource Hover}"/>
-                <Setter TargetName="bd" Property="BorderBrush" Value="#3C4A5C"/>
+                <Setter TargetName="bd" Property="BorderBrush" Value="#7A8AA2"/>
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
                 <Setter TargetName="bd" Property="Background" Value="#161D27"/>
@@ -98,7 +98,7 @@ $SteamSaveTheme = @'
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
                 <Setter TargetName="pb" Property="Background"  Value="#4786AB"/>
-                <Setter TargetName="pb" Property="BorderBrush" Value="#27536B"/>
+                <Setter TargetName="pb" Property="BorderBrush" Value="#4E7E99"/>
                 <Setter TargetName="pb" Property="BorderThickness" Value="2"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
@@ -157,10 +157,10 @@ $SteamSaveTheme = @'
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Thumb">
-            <Border x:Name="t" CornerRadius="4" Background="#39465A" Margin="3,0"/>
+            <Border x:Name="t" CornerRadius="4" Background="#5A6A80" Margin="3,0"/>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="t" Property="Background" Value="#4C5C74"/>
+                <Setter TargetName="t" Property="Background" Value="#6C7C94"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>

@@ -108,6 +108,11 @@ $Checks = @(
     @{ W='browser'; T='Search placeholder';                Fg=$C.Muted;  Bg=$C.Panel2; S=12;   B=$false }
     @{ W='browser'; T='Search text typed';                 Fg=$C.Text;   Bg=$C.Panel2; S=12;   B=$false }
     @{ W='browser'; T='No games match';                    Fg=$C.Muted;  Bg=$C.Panel;  S=12;   B=$false }
+    @{ W='browser'; T='Scrollbar thumb vs panel';            Fg='#5A6A80'; Bg=$C.Panel;  S=1;  B=$false; K='graphic' }
+    @{ W='browser'; T='Scrollbar thumb vs page';             Fg='#5A6A80'; Bg=$C.Bg;     S=1;  B=$false; K='graphic' }
+    @{ W='browser'; T='Scrollbar thumb (hover)';             Fg='#6C7C94'; Bg=$C.Panel;  S=1;  B=$false; K='graphic' }
+    @{ W='browser'; T='Button border (hover)';               Fg='#7A8AA2'; Bg=$C.Bg;     S=1;  B=$false; K='graphic' }
+    @{ W='browser'; T='Primary button rim (pressed)';        Fg='#4E7E99'; Bg=$C.Bg;     S=1;  B=$false; K='graphic' }
     @{ W='browser'; T='Card outline (decorative)';    Fg=$C.Line;    Bg=$C.Bg;    S=1; B=$false; K='decorative' }
 
     # --- timeline rows

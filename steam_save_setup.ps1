@@ -18,6 +18,7 @@ Add-Type -AssemblyName System.Windows.Forms      # FolderBrowserDialog
 
 . (Join-Path $PSScriptRoot 'steam_save_settings.ps1')
 . (Join-Path $PSScriptRoot 'steam_save_theme.ps1')
+. (Join-Path $PSScriptRoot 'steam_save_dialogs.ps1')   # Show-ConfirmDialog
 . (Join-Path $PSScriptRoot 'steam_save_capture.ps1')   # brings roots + timelines with it
 $cfg       = Get-SteamSaveSettings
 $MirrorDir = $cfg.MirrorDir
@@ -151,16 +152,20 @@ function Install-Dependency {
     param([string]$WingetId, [string]$Name, [string]$Manual)
 
     if (-not (Test-Winget)) {
-        [System.Windows.MessageBox]::Show(
-            "$Name is missing, and winget (Windows Package Manager) is not available to install it.`n`nInstall it manually from:`n$Manual`n`nThen re-run this setup.",
-            'Install needed', 'OK', 'Information') | Out-Null
+        Show-ConfirmDialog -Owner $window -Title 'Install needed' `
+            -Headline "$Name is missing" `
+            -Body "winget, the Windows Package Manager, is not available on this PC, so this cannot install it for you." `
+            -Note "Install it yourself from $Manual, then run setup again." `
+            -Tone 'warn' -ConfirmLabel 'OK' -CancelLabel $null | Out-Null
         return $false
     }
 
-    $ok = [System.Windows.MessageBox]::Show(
-        "Install $Name now?`n`nThis runs:`n    winget install --id $WingetId`n`nIt downloads and installs from the Windows Package Manager, and may show a UAC prompt.",
-        "Install $Name", 'YesNo', 'Question')
-    if ($ok -ne 'Yes') { return $false }
+    $ok = Show-ConfirmDialog -Owner $window -Title "Install $Name" `
+        -Headline "Install $Name now?" `
+        -Body "This runs winget install --id $WingetId, which downloads and installs it through the Windows Package Manager. Windows may ask you to approve it." `
+        -Note 'Nothing is installed unless you say yes here.' `
+        -Tone 'info' -ConfirmLabel "Install $Name" -CancelLabel 'Not now'
+    if (-not $ok) { return $false }
 
     $ProgressPanel.Visibility = 'Visible'
     Write-Log "[install] $Name via winget..."
@@ -456,9 +461,11 @@ function Connect-GitHubRepo {
         Write-Log '[copy] signing in to GitHub...'
         Start-Process powershell -ArgumentList '-NoProfile', '-Command',
             'gh auth login --hostname github.com --git-protocol https --web; Write-Host ""; Read-Host "Done - press Enter to close"'
-        [System.Windows.MessageBox]::Show(
-            "Setting up your free online backup.`n`nA window has opened and will send you to your browser to sign in to GitHub. Most people only know GitHub as somewhere they download things from, it also gives you a free private space to keep files, and that is all it is being used for here. If you don't have an account, you can create one on that page.`n`nFinish in the browser, then come back and press OK.",
-            'One-time sign-in', 'OK', 'Information') | Out-Null
+        Show-ConfirmDialog -Owner $window -Title 'One-time sign-in' `
+            -Headline 'Setting up your free online backup' `
+            -Body "A window has opened and will send you to your browser to sign in to GitHub. Most people know GitHub only as somewhere they download things from. It also gives you a free private space to keep files, and that is all it is being used for here. If you do not have an account, you can create one on that page." `
+            -Note 'Finish in the browser, then come back and press OK.' `
+            -Tone 'info' -ConfirmLabel 'OK' -CancelLabel $null | Out-Null
         & gh auth status 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { Write-Log '[copy] not signed in, skipped'; return $null }
     }

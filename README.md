@@ -341,12 +341,19 @@ happen before agreeing to it.
 
 ## Accessibility
 
-The interface is audited against **WCAG 2.2 AA**, not by eye. `contrast-check.ps1`
-walks an inventory of every piece of UI copy with its real size and weight and
-checks it against 1.4.3 (4.5:1 normal text, 3:1 large) and 1.4.11 (3:1 for
-meaningful icons and for the boundaries of interactive components). All 77
-checks pass. Static card outlines are recorded as decorative and reported as
-out of scope rather than being quietly left out of the list.
+**Contrast is audited, not eyeballed.** `contrast-check.ps1` walks an inventory
+of every piece of UI copy with its real size and weight and checks it against
+1.4.3 (4.5:1 normal text, 3:1 large) and 1.4.11 (3:1 for meaningful icons and
+for the boundaries of interactive components). All 85 checks pass. Static card
+outlines are recorded as decorative and reported as out of scope rather than
+being quietly left out of the list.
+
+Being precise about the scope, because "audited against WCAG 2.2 AA" would
+claim more than that check can see: it covers contrast, and only contrast. The
+controls do not yet carry explicit accessible names (4.1.2), so a screen reader
+announces a text box by its role rather than by the caption sitting beside it.
+That is a real gap and it is on the list, not quietly covered by the word
+audited.
 
 Icons come from the system icon font (Segoe Fluent Icons, falling back to Segoe
 MDL2 Assets), so there is nothing to install and no missing-glyph boxes. The app
@@ -357,6 +364,23 @@ Inside the mirror, each game folder carries a `desktop.ini` so Explorer shows
 what every commit references. Those files are gitignored: Explorer only honours
 them when the folder itself is marked read-only, and git stores no file
 attributes, so a cloned copy would be inert anyway.
+
+## When something looks wrong
+
+Capture writes a log to `%LOCALAPPDATA%\Steam Save Timeline\watcher.log`. It
+records every snapshot, every sweep, every warning and every failure, and rolls
+over at a megabyte. The daemon runs with no console on purpose, so this file is
+the only place its problems surface.
+
+Two lines are worth recognising:
+
+- `[exit] another watcher is already running` is the guard working, not a
+  failure. Only one watcher may run per history folder, because two writing at
+  once used to corrupt each other.
+- `[warn] refusing an empty commit` means a save point was about to be recorded
+  with no files in it and was rejected. Nothing was lost; it is worth reporting.
+
+To check it is alive at all, look for a recent `[sweep]` or `[sync]` line.
 
 ## Configuration
 
