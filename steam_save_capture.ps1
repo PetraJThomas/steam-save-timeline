@@ -30,11 +30,106 @@ function Set-CaptureLogger([scriptblock]$Logger) {
     $script:CapLog = $Logger
     Set-TimelineLogger $Logger   # lock and corruption warnings go the same way
 }
-function Write-Capture([string]$Message) { & $script:CapLog $Message }
+# Out-Null because the logger is supplied by the caller: setup hands in one
+# that writes to its progress panel, and any logger that RETURNS a value
+# would otherwise leak it into the pipeline of whatever called this.
+function Write-Capture([string]$Message) { & $script:CapLog $Message | Out-Null }
 
 function Write-GamesJson([hashtable]$Names) {
     # appid -> name map at repo root, so the GUI never has to find Steam itself
     $Names | ConvertTo-Json | Set-Content (Join-Path $script:CapMirror 'games.json') -Encoding UTF8
+}
+
+function Get-PlainCopyRoot {
+    <# The "Your saves (latest)" folder beside a folder-based second copy, or
+       $null when the second copy is a URL or there is no second copy. #>
+    $origin = Get-GitLine @('remote', 'get-url', 'origin')
+    if (-not $origin -or $origin -notmatch '\.git$') { return $null }
+    if ($origin -match '^[a-z]+://' -or $origin -match '^[^\/:]+@') { return $null }
+    $folder = Split-Path $origin -Parent
+    if (-not $folder -or -not (Test-Path $folder)) { return $null }
+    return (Join-Path $folder 'Your saves (latest)')
+}
+
+function Update-PlainCopyNames {
+    <#
+    Follow branch renames in the plain copy. The folders there are named after
+    the branch root, so a game renamed from `app-389140` to
+    `horizon-chase-turbo-389140` would otherwise leave its old folder sitting
+    there forever, frozen at the moment of the rename. Someone recovering from
+    that folder alone would find the same game twice with different contents,
+    which is exactly the situation the plain copy exists to avoid.
+
+    Rename rather than delete, and only when the destination is free. Nothing
+    here is worth losing data over.
+    #>
+    $plain = Get-PlainCopyRoot
+    if (-not $plain -or -not (Test-Path $plain)) { return 0 }
+    # Not conditional on there being moves this run: the reconcile below is what
+    # catches folders orphaned by an earlier version, which no rename will ever
+    # revisit.
+    $moves = @(Get-LastRootMoves)
+
+    $done = 0
+    foreach ($m in $moves) {
+        $from = Join-Path $plain (Split-Path $m[0] -Leaf)
+        $to   = Join-Path $plain (Split-Path $m[1] -Leaf)
+        if (-not (Test-Path $from)) { continue }
+        if (Test-Path $to) {
+            Write-Capture "[warn] plain copy: both $(Split-Path $m[0] -Leaf) and $(Split-Path $m[1] -Leaf) exist; left alone"
+            continue
+        }
+        try { Move-Item $from $to -Force; $done++ }
+        catch { Write-Capture "[warn] plain copy: could not rename $(Split-Path $m[0] -Leaf): $_" }
+    }
+    return $done + (Remove-PlainCopyDuplicates)
+}
+
+function Remove-PlainCopyDuplicates {
+    <#
+    Following a rename only helps when the rename happens in the same run. A
+    folder orphaned by an earlier version is never revisited, and one is sitting
+    in a real backup right now: `app-389140` beside `horizon-chase-turbo-389140`,
+    same game, different contents, thirteen files against twenty.
+
+    That is the worst place for it. The plain copy exists for someone with no
+    git and no way to tell which of two folders is current, and the stale one
+    reads as a separate, nameless game.
+
+    Deliberately narrow. A folder is only removed when another folder for the
+    SAME appid matches that game's current branch root, so there is always a
+    live copy left. Anything whose name does not end in a known appid is left
+    alone: the folder belongs to the person, not to us.
+    #>
+    $plain = Get-PlainCopyRoot
+    if (-not $plain -or -not (Test-Path $plain)) { return 0 }
+
+    $current = @{}
+    foreach ($ref in @(Get-GitOutput @('for-each-ref', '--format=%(refname:short)', 'refs/heads/game/'))) {
+        $ref = ([string]$ref).Trim()
+        if (-not $ref) { continue }
+        $parts = $ref -split '/'
+        if ($parts.Count -ne 3) { continue }
+        $appId = ($parts[1] -split '-')[-1]
+        if ($appId -match '^\d+$') { $current[$appId] = $parts[1] }
+    }
+    if ($current.Count -eq 0) { return 0 }
+
+    $removed = 0
+    foreach ($dir in @(Get-ChildItem $plain -Directory -ErrorAction SilentlyContinue)) {
+        $appId = ($dir.Name -split '-')[-1]
+        if ($appId -notmatch '^\d+$') { continue }
+        if (-not $current.ContainsKey($appId)) { continue }
+        $live = $current[$appId]
+        if ($dir.Name -eq $live) { continue }
+        if (-not (Test-Path (Join-Path $plain $live))) { continue }   # never the only copy
+        try {
+            Remove-Item $dir.FullName -Recurse -Force -ErrorAction Stop
+            Write-Capture "[plain] removed stale $($dir.Name), superseded by $live"
+            $removed++
+        } catch { Write-Capture "[warn] plain copy: could not remove $($dir.Name): $_" }
+    }
+    return $removed
 }
 
 function Update-PlainCopy([string]$AppId, [string]$SourceDir) {
@@ -203,15 +298,31 @@ function Restore-FromBackup([string]$BackupRepo, [string]$Destination) {
     $made = 0
     foreach ($ref in @(& git -C $Destination for-each-ref --format='%(refname:short)' refs/remotes/origin)) {
         $ref = ([string]$ref).Trim()
-        if (-not $ref -or $ref -eq 'origin/HEAD') { continue }
+        if (-not $ref) { continue }
+        # git shortens refs/remotes/origin/HEAD to plain "origin" while no local
+        # branch of that name exists, so guarding on the string 'origin/HEAD'
+        # missed it and we created a branch literally called `origin`. After
+        # that every `origin` in the recovered mirror is an ambiguous refname.
+        if ($ref -eq 'origin' -or $ref -like '*/HEAD') { continue }
         $local = $ref -replace '^origin/', ''
+        if (-not $local -or $local -eq 'origin') { continue }
         & git -C $Destination show-ref --verify --quiet "refs/heads/$local" 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) { continue }     # HEAD's branch already exists
         & git -C $Destination branch --quiet $local $ref 2>&1 | Out-Null
         $made++
     }
-    $total = @(& git -C $Destination branch --list).Count
+    # Count timelines, not refs. `master` holds metadata and is not a timeline,
+    # so counting every branch reported 63 recovered for 30 games, at the one
+    # moment someone is deciding whether to believe the tool.
+    $total = @(& git -C $Destination branch --list 'game/*').Count
     Write-Capture "[restore] $total timeline(s) recovered, $made recreated from the backup"
+
+    # A backup that yields no timelines is a failed recovery, not a quiet one.
+    # This used to return normally and setup would carry on building a fresh
+    # empty mirror over the top, saying nothing.
+    if (@(& git -C $Destination branch --list 'game/*/main').Count -eq 0) {
+        throw "that backup produced no game timelines, so nothing was recovered from it"
+    }
     return $total
 }
 

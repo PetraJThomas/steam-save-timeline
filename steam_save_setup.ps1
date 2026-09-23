@@ -843,6 +843,7 @@ function Invoke-Setup {
         Write-GamesIndex $names
         Set-TimelineGameNames $names
         $renamedRefs = Update-BranchNaming $names
+        $plainMoved = Update-PlainCopyNames   # the second copy's folders follow the refs
         if ($renamedRefs -gt 0) { Write-Log "[init] renamed $renamedRefs branch(es) to include game names" }
         $seeded = Initialize-GameTimelines $names
         if ($seeded -gt 0) { Write-Log "[init] created $seeded game timeline(s)" }

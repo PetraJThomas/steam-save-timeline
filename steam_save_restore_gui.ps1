@@ -251,7 +251,11 @@ $SteamSaveTheme
 function Test-SteamRunning { [bool](Get-Process -Name 'steam' -ErrorAction SilentlyContinue) }
 
 function Close-Steam([string]$SteamRoot) {
-    & (Join-Path $SteamRoot 'steam.exe') -shutdown
+    # Steam is running, so asking it to stop should not itself be able to throw
+    # out of the click handler if the exe is not where we expected.
+    $exe = Join-Path $SteamRoot 'steam.exe'
+    if (-not (Test-Path $exe)) { return $false }
+    try { & $exe -shutdown } catch { return $false }
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Seconds 1
         if (-not (Test-SteamRunning)) { return $true }
@@ -260,10 +264,39 @@ function Close-Steam([string]$SteamRoot) {
 }
 
 function Get-UserdataAppDir([string]$AppId, [string]$SteamRoot) {
-    $uid = Get-ChildItem (Join-Path $SteamRoot 'userdata') -Directory |
-           Where-Object { Test-Path (Join-Path $_.FullName $AppId) } |
-           Select-Object -First 1
-    if ($uid) { return (Join-Path $uid.FullName $AppId) }
+    <#
+    Steam's per-user folder for one game. Two cases matter more than they look,
+    because both are the rebuilt-PC case this tool exists for:
+
+    `userdata\` itself is missing on a Steam that nobody has signed into yet.
+    That used to throw straight out of the click handler, under the script's
+    ErrorActionPreference of Stop, leaving the window silent.
+
+    And `userdata\<uid>\<appid>` only appears once the game has been run. On a
+    fresh machine it is absent for exactly the game you came here to rescue, so
+    the restore reported "no path on this PC" and refused. The account folder is
+    right there, so create the game folder rather than send someone away to
+    launch the game first.
+    #>
+    $userdata = Join-Path $SteamRoot 'userdata'
+    if (-not (Test-Path $userdata)) { return $null }
+
+    $dirs = @(Get-ChildItem $userdata -Directory -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match '^\d+$' -and $_.Name -ne '0' })
+    if ($dirs.Count -eq 0) { return $null }
+
+    $withGame = @($dirs | Where-Object { Test-Path (Join-Path $_.FullName $AppId) })
+    if ($withGame.Count -gt 0) { return (Join-Path $withGame[0].FullName $AppId) }
+
+    # One signed-in account: unambiguous, so make the folder. More than one and
+    # we would be guessing whose save this is, which is not ours to guess.
+    if ($dirs.Count -eq 1) {
+        $make = Join-Path $dirs[0].FullName $AppId
+        try {
+            New-Item -ItemType Directory -Path $make -Force -ErrorAction Stop | Out-Null
+            return $make
+        } catch { return $null }
+    }
     return $null
 }
 
@@ -298,7 +331,20 @@ function Get-RestorePlan([string]$AppId, [string]$Hash, [string]$SteamRoot) {
         foreach ($e in @(Get-GitOutput @('ls-tree', '--name-only', $Hash, "$AppId/roots/"))) {
             $rootName = Split-Path ([string]$e) -Leaf
             $dest = Resolve-SteamRootBase -Root $rootName -AppId $AppId -SteamRoot $SteamRoot -AppDir $appDir
-            if (-not $dest -and $recorded.ContainsKey($rootName)) { $dest = $recorded[$rootName] }
+            if (-not $dest -and $recorded.ContainsKey($rootName)) {
+                # roots.json says where this pointed when the snapshot was taken.
+                # Only offer it if that place still exists: the parent has to be
+                # real. Otherwise a moved library drive or an uninstalled game
+                # would have the folder conjured into being and saves written
+                # somewhere nobody will ever look, reported as a success.
+                $candidate = [string]$recorded[$rootName]
+                if ($candidate) {
+                    $parent = Split-Path $candidate -Parent
+                    if ((Test-Path $candidate) -or ($parent -and (Test-Path $parent))) {
+                        $dest = $candidate
+                    }
+                }
+            }
             $plan += [pscustomobject]@{
                 Root   = $rootName
                 Source = (Join-Path $MirrorDir "$AppId\roots\$rootName")
@@ -323,6 +369,19 @@ function Restore-Save([string]$AppId, [string]$Hash, [string]$GameName, [string]
 
     # 2. Roll the mirror to the chosen point, then commit that onto whichever
     #    timeline is active. The state being replaced stays in history.
+    #
+    #    One lock around the whole of this AND the copy-out below. Each step
+    #    used to take and drop its own, which left the laid-out files
+    #    unprotected in between: a capture waiting on the mutex would take it
+    #    the instant Expand-AppTree let go, wipe the folder and refill it from
+    #    the LIVE save. The copy back into Steam then wrote the very save the
+    #    person was trying to replace. Measured under contention it went wrong
+    #    28 times out of 29, and only 1 restore in 29 was even recorded,
+    #    because by commit time there was nothing new to commit.
+    if (-not (Enter-TimelineLock)) {
+        return 'The mirror is busy right now. Try again in a moment.'
+    }
+    try {
     if (-not (Expand-AppTree $AppId $Hash)) { return 'Could not read that point out of git.' }
     $branch = Get-ActiveTimeline $AppId
     New-AppCommit $AppId $branch "[$AppId] ${GameName}: RESTORE to $($Hash.Substring(0,8))" | Out-Null
@@ -334,16 +393,30 @@ function Restore-Save([string]$AppId, [string]$Hash, [string]$GameName, [string]
     $skipped = @()
     foreach ($p in $Plan) {
         if (-not $p.Dest)               { $skipped += "$($p.Root) (no path on this PC)"; continue }
-        if (-not (Test-Path $p.Source)) { $skipped += "$($p.Root) (not in that commit)"; continue }
-        New-Item -ItemType Directory -Path $p.Dest -Force | Out-Null
-        Copy-Item (Join-Path $p.Source '*') $p.Dest -Recurse -Force
-        $done += $p.Root
+        if (-not (Test-Path $p.Source)) { $skipped += "$($p.Root) (was not checked out)"; continue }
+        # Per destination. An unwritable one used to throw out of the whole
+        # function: every later root went unattempted, no message came back at
+        # all, and history already carried a RESTORE commit claiming the lot.
+        # One bad drive should cost that root, not the restore.
+        try {
+            $base = Split-Path $p.Dest -Parent
+            if ($base -and (Test-Path $base -PathType Leaf)) {
+                throw "$base is a file, not a folder"
+            }
+            if (Test-Path $p.Dest -PathType Leaf) { throw "$($p.Dest) is a file, not a folder" }
+            New-Item -ItemType Directory -Path $p.Dest -Force -ErrorAction Stop | Out-Null
+            Copy-Item (Join-Path $p.Source '*') $p.Dest -Recurse -Force -ErrorAction Stop
+            $done += $p.Root
+        } catch {
+            $skipped += "$($p.Root) (could not write: $($_.Exception.Message))"
+        }
     }
     if ($done.Count -eq 0) { return "Nothing was restored: no usable destination. $($skipped -join '; ')" }
 
     $msg = "Restored $GameName to $($Hash.Substring(0,8)): $($done -join ', ')."
     if ($skipped.Count -gt 0) { $msg += " Skipped: $($skipped -join '; ')." }
     return "$msg`nStart Steam, launch the game, and if a sync conflict appears choose LOCAL files."
+    } finally { Exit-TimelineLock }
 }
 
 function Invoke-RestoreFlow($Game, [string]$Hash, [string]$Label, [string]$SteamRoot) {

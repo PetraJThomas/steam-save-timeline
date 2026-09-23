@@ -32,11 +32,15 @@ Dot-sourced by the watcher and the restore GUI. Call Initialize-Timelines first.
 $script:TLMirror = $null
 $script:TLMeta   = $null
 $script:TLLog       = { param($Message) Write-Host $Message }
+$script:TLRootMoves = @()
 $script:TLLock      = $null
 $script:TLLockDepth = 0
 
 function Set-TimelineLogger([scriptblock]$Logger) { $script:TLLog = $Logger }
-function Write-Timeline([string]$Message) { & $script:TLLog $Message }
+# Out-Null because the logger is supplied by the caller: setup hands in one
+# that writes to its progress panel, and any logger that RETURNS a value
+# would otherwise leak it into the pipeline of whatever called this.
+function Write-Timeline([string]$Message) { & $script:TLLog $Message | Out-Null }
 
 # ---------------- one writer at a time ----------------
 
@@ -130,7 +134,25 @@ function Get-GitOutput([string[]]$GitArgs) {
 }
 
 function Get-GitLine([string[]]$GitArgs) {
-    $v = @(Get-GitOutput $GitArgs) | Select-Object -First 1
+    <#
+    One line of output, or $null when git failed.
+
+    The exit-code check is load-bearing, not tidiness. `git rev-parse` writes
+    the argument it could not resolve to STDOUT and the `fatal:` to stderr,
+    which Get-GitOutput discards, so asking for a path that does not exist used
+    to hand back the literal string "master:timelines.json" -- truthy, and
+    indistinguishable from a real hash.
+
+    That made New-PathCommit's "which of these paths does the branch already
+    know" filter answer "all of them", so a fresh mirror staged timelines.json
+    before anything had created it, `git add` failed, and the whole metadata
+    commit was abandoned. The second copy on a new install therefore never
+    received games.json or GAMES.md: no appid-to-name map for the one person
+    who most needs it, someone restoring onto a machine with nothing on it.
+    #>
+    $out = @(Get-GitOutput $GitArgs)
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $v = $out | Select-Object -First 1
     if ($v) { return ([string]$v).Trim() }
     return $null
 }
@@ -302,11 +324,13 @@ function New-PathCommit {
 
     if (-not (Enter-TimelineLock)) { return $null }
 
+    # Inside the try from here: anything that throws between taking the lock and
+    # entering it would never release it.
+    try {
     $parent = $null
     if (Test-Timeline $Branch) { $parent = Get-GitLine @('rev-parse', $Branch) }
 
     $env:GIT_INDEX_FILE = $idx
-    try {
         if ($parent) { if ((Invoke-Git @('read-tree', $Branch)) -ne 0) { return $null } }
         else         { if ((Invoke-Git @('read-tree', '--empty')) -ne 0) { return $null } }
 
@@ -360,14 +384,29 @@ function Expand-AppTree([string]$AppId, [string]$Commit) {
     # as deleted.
     if (-not (Enter-TimelineLock)) { return $false }
 
-    $dir = Join-Path $script:TLMirror $AppId
-    if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
-
+    # Everything after the lock lives in the try. The wipe used to sit outside
+    # it, and a single open handle on a file in that folder (Explorer, an AV
+    # scanner, a sync client) threw under the GUI's ErrorActionPreference of
+    # Stop, so the lock was never released. The window looked fine while every
+    # other process, the capture daemon included, stalled 180s per call and
+    # then skipped, for as long as that window stayed open.
     $idx = Join-Path $script:TLMirror ('.git\timeline-checkout-index-{0}-{1}' -f $PID, [guid]::NewGuid().ToString('N'))
-    if (Test-Path $idx) { Remove-Item $idx -Force -ErrorAction SilentlyContinue }
-    $env:GIT_INDEX_FILE = $idx
-    try { return ((Invoke-Git @('checkout', $Commit, '--', "$AppId/")) -eq 0) }
-    finally {
+    try {
+        # Ask before destroying. If the commit holds nothing for this game there
+        # is no checkout to do, and wiping first would delete the folder for
+        # nothing.
+        if ((Invoke-Git @('cat-file', '-e', "${Commit}:$AppId")) -ne 0) { return $false }
+
+        $dir = Join-Path $script:TLMirror $AppId
+        if (Test-Path $dir) { Remove-Item $dir -Recurse -Force -ErrorAction Stop }
+
+        if (Test-Path $idx) { Remove-Item $idx -Force -ErrorAction SilentlyContinue }
+        $env:GIT_INDEX_FILE = $idx
+        return ((Invoke-Git @('checkout', $Commit, '--', "$AppId/")) -eq 0)
+    } catch {
+        Write-Timeline "[warn] could not lay out $AppId from ${Commit}: $_"
+        return $false
+    } finally {
         Remove-Item env:GIT_INDEX_FILE -ErrorAction SilentlyContinue
         if (Test-Path $idx) { Remove-Item $idx -Force -ErrorAction SilentlyContinue }
         Exit-TimelineLock
@@ -416,13 +455,31 @@ function Invoke-MakeCanonical {
     $tip = Get-GitLine @('rev-parse', $Branch)
     if (-not $tip) { return @{ Ok = $false; Message = 'That timeline has no commits.' } }
 
-    if (-not (Expand-AppTree $AppId $tip)) {
-        return @{ Ok = $false; Message = 'Could not read that timeline out of git.' }
+    # One lock across laying the tree out AND committing it. Taking it twice let
+    # a capture land in between, overwrite the folder with live saves, and leave
+    # New-AppCommit with nothing new to commit. It then returned Ok with no
+    # commit and moved the player back to main, which did not hold the branch's
+    # saves at all.
+    if (-not (Enter-TimelineLock)) {
+        return @{ Ok = $false; Message = 'The mirror was busy. Try again in a moment.' }
     }
-    $label  = Get-TimelineLabel $AppId $Branch
-    $commit = New-AppCommit $AppId $main "[$AppId] ${GameName}: CANONICAL from $label ($($tip.Substring(0,8)))"
-    Set-ActiveTimeline $AppId $main
-    return @{ Ok = $true; Commit = $commit; Branch = $main; From = $label }
+    try {
+        if (-not (Expand-AppTree $AppId $tip)) {
+            return @{ Ok = $false; Message = 'Could not read that timeline out of git.' }
+        }
+        $label  = Get-TimelineLabel $AppId $Branch
+        $commit = New-AppCommit $AppId $main "[$AppId] ${GameName}: CANONICAL from $label ($($tip.Substring(0,8)))"
+        if (-not $commit) {
+            # No commit is only legitimate when main already holds exactly this.
+            # Otherwise something raced us, and saying "done" would be a lie.
+            $same = (Get-GitLine @('rev-parse', "${main}^{tree}")) -eq (Get-GitLine @('rev-parse', "${tip}^{tree}"))
+            if (-not $same) {
+                return @{ Ok = $false; Message = 'Nothing was written: the mirror changed while this ran. Try again.' }
+            }
+        }
+        Set-ActiveTimeline $AppId $main
+        return @{ Ok = $true; Commit = $commit; Branch = $main; From = $label }
+    } finally { Exit-TimelineLock }
 }
 
 function Get-LastSnapshotTime([string]$AppId, [string]$Branch) {
@@ -430,6 +487,11 @@ function Get-LastSnapshotTime([string]$AppId, [string]$Branch) {
     $d = Get-GitLine @('log', '-1', '--format=%aI', $Branch)
     if ($d) { try { return [datetime]$d } catch {} }
     return $null
+}
+
+function Get-LastRootMoves {
+    <# (old root, new root) pairs from the most recent Update-BranchNaming. #>
+    return $script:TLRootMoves
 }
 
 function Update-BranchNaming([hashtable]$Names) {
@@ -446,21 +508,103 @@ function Update-BranchNaming([hashtable]$Names) {
     $map        = Get-TimelineMap
     $mapChanged = $false
     $renamed    = 0
+    $moved      = @()
+    $script:TLRootMoves = @()
 
     foreach ($ref in @(Get-GitOutput @('for-each-ref', '--format=%(refname:short)', 'refs/heads/game/'))) {
         $ref = ([string]$ref).Trim()
         if (-not $ref) { continue }
         $parts = $ref -split '/'
-        if ($parts.Count -ne 3 -or $parts[1] -notmatch '^\d+$') { continue }   # already named
+        if ($parts.Count -ne 3) { continue }
 
-        $appId = $parts[1]
-        $new   = "game/$(Get-GameSlug $appId)-$appId/$($parts[2])"
+        # Two shapes get healed. `game/<appid>/*` is the original layout. So is
+        # `game/app-<appid>/*`, which happens when a game is captured before its
+        # name is known: the capture is fine, but the game shows up in the
+        # browser as "app 389140" and looks like it was never captured. Once a
+        # real name exists, move it. A game Steam has no name for at all (the
+        # client itself, controller configs) keeps `app` and is left alone,
+        # rather than churning the ref on every startup.
+        $appId = $null
+        if     ($parts[1] -match '^\d+$')      { $appId = $parts[1] }
+        elseif ($parts[1] -match '^app-(\d+)$') { $appId = $Matches[1] }
+        else { continue }                                          # already named
+
+        $slug = Get-GameSlug $appId
+        if ($slug -eq 'app') { continue }                          # still nameless
+        $new = "game/$slug-$appId/$($parts[2])"
         if ($new -eq $ref) { continue }
-        if ((Invoke-Git @('branch', '-m', $ref, $new)) -ne 0) { continue }
+        if ((Invoke-Git @('branch', '-m', $ref, $new)) -ne 0) {
+            <#
+            `git branch -m` refuses when the target already exists, which means
+            this game has ended up under two roots at once. That is reachable:
+            a rename whose `push --delete` of the old name failed leaves the
+            second copy holding both, and restoring from it brings both back.
+
+            Silently giving up was the worst answer. Whichever root won the
+            `for-each-ref` lookup became the game, and every commit under the
+            other one stayed in the repo but vanished from the browser, with no
+            warning and no later pass able to repair it.
+
+            Park it under the correct root instead. Nothing is deleted, nothing
+            is overwritten, and the orphaned history shows up in the browser as
+            an extra timeline the person can look at and make canonical. Which
+            of the two deserves to be `main` is their call, not ours.
+            #>
+            $parked = $null
+            for ($i = 1; $i -le 50; $i++) {
+                $try = "$new-recovered-$i"
+                if (-not (Test-Timeline $try)) { $parked = $try; break }
+            }
+            if ($parked -and (Invoke-Git @('branch', '-m', $ref, $parked)) -eq 0) {
+                Write-Timeline "[warn] $ref could not become $new because that already exists; kept as $parked so its history stays reachable"
+                $renamed++
+                $moved += ,@($ref, $parked)
+            } else {
+                Write-Timeline "[warn] $ref could not be renamed to $new and could not be parked; its history is only reachable with git"
+            }
+            continue
+        }
 
         $renamed++
+        $moved += ,@($ref, $new)
         foreach ($k in @($map.Keys)) {
             if ($map[$k] -eq $ref) { $map[$k] = $new; $mapChanged = $true }
+        }
+    }
+
+    # A rename that stops at the local mirror leaves the second copy holding the
+    # old name forever. Restoring from that backup then recreates both refs, so
+    # one game arrives as two timelines, and the stale one still matches the
+    # `game/*-<appid>/*` lookup. Carry the rename across: push the new name,
+    # then drop the old. Best effort, because the backup may be offline, and a
+    # failure here must never cost a capture.
+    # Roots, not refs: anything named after a root (the plain second copy folders)
+    # has to follow the rename too, or it is orphaned under the old name.
+    $seen = @{}
+    foreach ($pair in $moved) {
+        $oldRoot = $pair[0].Substring(0, $pair[0].LastIndexOf('/'))
+        $newRoot = $pair[1].Substring(0, $pair[1].LastIndexOf('/'))
+        if ($oldRoot -eq $newRoot) { continue }
+        $key = "$oldRoot->$newRoot"
+        if ($seen.ContainsKey($key)) { continue }
+        $seen[$key] = $true
+        $script:TLRootMoves += ,@($oldRoot, $newRoot)
+    }
+
+    if ($moved.Count -gt 0 -and (Invoke-Git @('remote', 'get-url', 'origin')) -eq 0) {
+        foreach ($pair in $moved) {
+            if ((Invoke-Git @('push', 'origin', $pair[1])) -ne 0) {
+                Write-Timeline "[warn] could not push $($pair[1]) to the second copy"
+                continue
+            }
+            if ((Invoke-Git @('push', 'origin', '--delete', $pair[0])) -ne 0) {
+                # A delete "fails" when the old name was never pushed there in
+                # the first place, which is the common case and not worth a
+                # warning. Only say something if it really is still there.
+                if (Get-GitLine @('ls-remote', '--heads', 'origin', $pair[0])) {
+                    Write-Timeline "[warn] $($pair[0]) still exists in the second copy"
+                }
+            }
         }
     }
 

@@ -113,9 +113,18 @@ function Get-GameNames([string]$SteamRoot) {
         ForEach-Object {
             # -Encoding UTF8: Valve writes UTF-8, and the default ANSI read
             # turns every ™ / é in a game name into mojibake in games.json.
-            $state = (ConvertFrom-Vdf (Get-Content $_.FullName -Raw -Encoding UTF8))['AppState']
-            if ($state -and $state['appid'] -and $state['name']) {
-                $names[[string]$state['appid']] = [string]$state['name']
+            # Per manifest. Steam rewrites these as it starts, so one being
+            # briefly locked or half-written is ordinary. Unguarded it threw out
+            # of the watcher's startup, before the watcher existed, through a
+            # launcher with no console: capture simply never began and nothing
+            # anywhere said why.
+            try {
+                $state = (ConvertFrom-Vdf (Get-Content $_.FullName -Raw -Encoding UTF8))['AppState']
+                if ($state -and $state['appid'] -and $state['name']) {
+                    $names[[string]$state['appid']] = [string]$state['name']
+                }
+            } catch {
+                Write-Warning "could not read $($_.Name): $_"
             }
         }
     }

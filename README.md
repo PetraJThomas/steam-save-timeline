@@ -388,6 +388,14 @@ disagree with reality.
 - **No GUI for deleting a save branch** yet. Use `git branch -D
   game/<name>-<appid>/<slug>` by hand, and drop the entry from `timelines.json` if it
   was the active one.
+- **Games whose title has no Latin letters or digits** (Japanese, Cyrillic,
+  Greek, emoji, punctuation-only) get a branch and folder named
+  `app-<appid>` rather than a readable slug. The game's real name still
+  shows everywhere it is read from `games.json`, including the browser and
+  `GAMES.md`. Refs stay ASCII on purpose: git emits UTF-8, Windows
+  PowerShell 5.1 decodes it as the OEM codepage, and a non-ASCII ref read
+  back that way no longer resolves. A name we could write but never look up
+  again would be worse than a dull one.
 - **Windows only.** The ledger-watching approach ports to Linux and the Steam
   Deck trivially.
 - Only files Steam actually syncs are captured. If a game keeps part of its

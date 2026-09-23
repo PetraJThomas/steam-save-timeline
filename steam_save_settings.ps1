@@ -49,11 +49,44 @@ function Get-SteamSaveSettings {
     }
 
     $script:RawSettings = $values
+
+    # Per value, each falling back on its own. These casts used to sit outside
+    # every guard, so `"debounceSeconds": "fifteen"` threw out of this function.
+    # The watcher calls it at the top level with no try/catch and runs with no
+    # console, so one typo in settings.json killed capture with no error
+    # anywhere at all. A bad value is worth a warning, never the daemon.
+    function Get-Setting($Values, $Defaults, $Key, $Cast) {
+        try {
+            $v = & $Cast $Values[$Key]
+            if ($null -eq $v) { throw 'null' }
+            return $v
+        } catch {
+            Write-Warning "settings.json: $Key is not usable ('$($Values[$Key])'), using $($Defaults[$Key])"
+            return (& $Cast $Defaults[$Key])
+        }
+    }
+    $mirror = Get-Setting $values $defaults 'mirrorDir' { param($x) [Environment]::ExpandEnvironmentVariables([string]$x) }
+    if (-not ([string]$mirror).Trim()) {
+        Write-Warning "settings.json: mirrorDir is empty, using $($defaults.mirrorDir)"
+        $mirror = [Environment]::ExpandEnvironmentVariables([string]$defaults.mirrorDir)
+    }
+    $debounce = Get-Setting $values $defaults 'debounceSeconds'    { param($x) [int]$x }
+    $daily    = Get-Setting $values $defaults 'dailySnapshotHours' { param($x) [double]$x }
+    $task     = Get-Setting $values $defaults 'taskName'           { param($x) [string]$x }
+    # Zero or negative debounce means snapshotting mid-sync, which is worse than
+    # waiting for it to settle.
+    if ($debounce -lt 1) {
+        Write-Warning "settings.json: debounceSeconds must be at least 1, using $($defaults.debounceSeconds)"
+        $debounce = [int]$defaults.debounceSeconds
+    }
+    if ($daily -le 0) { $daily = [double]$defaults.dailySnapshotHours }
+    if (-not $task)   { $task  = [string]$defaults.taskName }
+
     $script:SettingsCache = [pscustomobject]@{
-        MirrorDir          = [Environment]::ExpandEnvironmentVariables([string]$values.mirrorDir)
-        DebounceSeconds    = [int]$values.debounceSeconds
-        DailySnapshotHours = [double]$values.dailySnapshotHours
-        TaskName           = [string]$values.taskName
+        MirrorDir          = ([string]$mirror).Trim()
+        DebounceSeconds    = $debounce
+        DailySnapshotHours = $daily
+        TaskName           = $task
         Path               = $path
     }
     return $script:SettingsCache
