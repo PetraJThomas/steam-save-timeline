@@ -162,17 +162,21 @@ syncs. The daily timeline is an archive and is never the timeline you are
 
 ### Restoring a save
 
-1. Open the Steam Save Timeline Browser, pick the game, pick the point. Opening a point
-   lists exactly what it holds: every file, its size, and when it was last
-   written. That is how you spot the bad save, because the one that dropped
-   to 2 KB is the reset.
-2. It shows you **every directory it is about to overwrite** before touching
+1. Open the Steam Save Timeline Browser and pick the game. The box above the
+   list filters as you type, on the game's name or its App ID. The App ID
+   matters: a game captured before Steam told us its name shows as
+   `app 389140`, and the number may be all you have to go on. Press Escape to
+   clear the box.
+2. Pick the point. Opening one lists exactly what it holds: every file, its
+   size, and when it was last written. That is how you spot the bad save,
+   because the one that dropped to 2 KB is the reset.
+3. It shows you **every directory it is about to overwrite** before touching
    anything. A restore can write into AppData, Documents or a game's install
    folder, and you should see that first.
-3. Close Steam when prompted. The browser offers to do it gracefully.
-4. Start Steam and launch the game. If Steam shows a sync conflict, choose
+4. Close Steam when prompted. The browser offers to do it gracefully.
+5. Start Steam and launch the game. If Steam shows a sync conflict, choose
    **LOCAL**, and your restored save uploads over the bad cloud copy.
-5. The watcher records that upload too, so even the recovery is in the timeline.
+6. The watcher records that upload too, so even the recovery is in the timeline.
 
 Per-file restores work from the command line. Steam identifies a game only by
 its App ID, so start from the name:
